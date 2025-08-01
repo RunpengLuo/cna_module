@@ -51,7 +51,7 @@ for CHR in $CHROMS; do
     -q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" | \
     bcftools call -m -Ou | \
     bcftools view -v snps -g het -m2 -M2 \
-        -i "FMT/DP>=${mincov}" -Oz -o ${snp_file} 1>"${LOGDIR}/genotype.${CHROM}.log" &
+        -i "FMT/DP>=${mincov}" -Oz -o ${snp_file} &>"${LOGDIR}/genotype.${CHROM}.log" &
 
     while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
         sleep 10
@@ -59,8 +59,13 @@ for CHR in $CHROMS; do
 done
 wait
 
+baf_dir="${OUTDIR}/baf"
+mkdir -p ${baf_dir}
+
 echo "allele counting on normal sample"
 date
+normal_1bed=${baf_dir}/normal.1bed
+>${normal_1bed}
 for CHR in $CHROMS; do
     CHROM=chr${CHR}
     snp_file="${snp_dir}/${CHROM}.vcf.gz"
@@ -72,10 +77,11 @@ for CHR in $CHROMS; do
     tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
     bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_file}" | gzip -9 > ${tgt_file}
 
-    normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
+    ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
     bcftools query -f '%CHROM\t%POS\tnormal\t[%AD{0}\t%AD{1}]\n' \
 		"${snp_file}" \
-		-o "${normal_1bed}"
+		-o "${ch_normal_1bed}"
+    cat ${ch_normal_1bed} >> ${normal_1bed}
 done
 
 echo "allele counting on ${SAMPLE}"
@@ -93,7 +99,7 @@ for CHR in $CHROMS; do
 		-q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" |
 		bcftools query \
 			-f "%CHROM\t%POS\t${SAMPLE}\t[%AD{0}\t%AD{1}]\n" \
-			-o "${tumor_1bed}" 1>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
+			-o "${tumor_1bed}" &>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
 
     while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
         sleep 10
@@ -101,6 +107,13 @@ for CHR in $CHROMS; do
 done
 wait
 
+tumor_1bed=${baf_dir}/tumor.1bed
+>${tumor_1bed}
+for CHR in $CHROMS; do
+    CHROM=chr${CHR}
+    ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
+    cat ${ch_tumor_1bed} >> ${tumor_1bed}
+done
 
 ########################################
 echo "start phasing"
@@ -115,11 +128,11 @@ for CHR in $CHROMS; do
     fi
     hiphase \
         --bam ${NORMAL_BAM} \
+        --reference ${REFERENCE} \
         --vcf ${snp_file} \
         --output-vcf ${phase_file} \
-        --reference ${reference} \
         --threads 2 \
-        --ignore-read-groups 1>"${LOGDIR}/hiphase.${CHROM}.log" &
+        --ignore-read-groups &>"${LOGDIR}/hiphase.${CHROM}.log" &
     
     while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
         sleep 10
@@ -127,19 +140,12 @@ for CHR in $CHROMS; do
 done
 
 ########################################
-echo "concat files"
+echo "concat phasing files"
 date
-baf_dir="${OUTDIR}/baf"
 phase_dir="${OUTDIR}/phase"
-mkdir -p ${baf_dir}
 mkdir -p ${phase_dir}
 
-normal_1bed=${baf_dir}/normal.1bed
-tumor_1bed=${baf_dir}/tumor.1bed
 phase_list_file=${TMPDIR}/phase.list
-
->${normal_1bed}
->${tumor_1bed}
 >${phase_list_file}
 
 for CHR in $CHROMS; do
