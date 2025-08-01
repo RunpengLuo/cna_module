@@ -152,7 +152,7 @@ for CHR in $CHROMS; do
     CHROM=chr${CHR}
     ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
     ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
-    ch_phase_file=${phase_dir}/${CHROM}.phased.vcf.gz
+    ch_phase_file="${TMPDIR}/${CHROM}.phased.vcf.gz"
     cat ${ch_normal_1bed} >> ${normal_1bed}
     cat ${ch_tumor_1bed} >> ${tumor_1bed}
     bcftools index -f ${ch_phase_file}
@@ -161,7 +161,7 @@ done
 
 phase_file=${phase_dir}/phased.vcf.gz
 bcftools concat --file-list ${phase_list_file} -Ou \
-    | bcftools sort -Oz -o ${concat_vcf_file}
+    | bcftools sort -Oz -o ${phase_file}
 bcftools index -f ${phase_file}
 
 echo "Done"
