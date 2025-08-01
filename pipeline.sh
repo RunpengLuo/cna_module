@@ -10,15 +10,21 @@ LOGDIR=${TMPDIR}/logs
 NORMAL_BAM=
 TUMOR_BAM=
 
-# parameters
-MSR=
-MSPB=
+# preprocessing parameters
 q=0
 Q=11
 d=300
 mincov=5
 CHROMS=$(seq 1 22)
 
+# binning parameters
+MSR=7500
+MTR=30
+READ_LENGTH=10000
+MSPB=20
+MAXB=1000000
+
+# general parameters
 MAXJOBS=4
 
 REGION_BED=/diskmnt/Users2/runpengl/data/chm12v2.0_region.bed
@@ -40,7 +46,7 @@ for CHR in $CHROMS; do
     CHROM=chr${CHR}
     snp_file="${snp_dir}/${CHROM}.vcf.gz"
     if [[ -f ${snp_file} ]]; then
-        echo "${CHROM} exists"
+        echo "${CHROM} exists, skip"
         continue
     fi
     tgt_file="${TMPDIR}/target.${CHROM}.pos.gz"
@@ -65,55 +71,63 @@ mkdir -p ${baf_dir}
 echo "allele counting on normal sample"
 date
 normal_1bed=${baf_dir}/normal.1bed
->${normal_1bed}
-for CHR in $CHROMS; do
-    CHROM=chr${CHR}
-    snp_file="${snp_dir}/${CHROM}.vcf.gz"
-    if [[ ! -f ${snp_file} ]]; then
-        exit 1
-    fi
-    bcftools index -f ${snp_file}
+if [[ ! -f ${normal_1bed} ]]; then
+    >${normal_1bed}
+    for CHR in $CHROMS; do
+        CHROM=chr${CHR}
+        snp_file="${snp_dir}/${CHROM}.vcf.gz"
+        if [[ ! -f ${snp_file} ]]; then
+            exit 1
+        fi
+        bcftools index -f ${snp_file}
 
-    tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
-    bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_file}" | gzip -9 > ${tgt_file}
+        tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
+        bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_file}" | gzip -9 > ${tgt_file}
 
-    ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
-    bcftools query -f '%CHROM\t%POS\tnormal\t[%AD{0}\t%AD{1}]\n' \
-		"${snp_file}" \
-		-o "${ch_normal_1bed}"
-    cat ${ch_normal_1bed} >> ${normal_1bed}
-done
+        ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
+        bcftools query -f '%CHROM\t%POS\tnormal\t[%AD{0}\t%AD{1}]\n' \
+            "${snp_file}" \
+            -o "${ch_normal_1bed}"
+        cat ${ch_normal_1bed} >> ${normal_1bed}
+    done
+else
+    echo "skip"
+fi
 
 echo "allele counting on ${SAMPLE}"
 date
-for CHR in $CHROMS; do
-    CHROM=chr${CHR}
-    tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
-    if [[ -f ${tumor_1bed} ]]; then
-        echo "${CHROM} exists"
-        continue
-    fi
-    tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
-	bcftools mpileup "${TUMOR_BAM}" -f "${REFERENCE}" \
-		-Ou -a AD,DP --skip-indels \
-		-q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" |
-		bcftools query \
-			-f "%CHROM\t%POS\t${SAMPLE}\t[%AD{0}\t%AD{1}]\n" \
-			-o "${tumor_1bed}" &>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
-
-    while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
-        sleep 10
-    done
-done
-wait
-
 tumor_1bed=${baf_dir}/tumor.1bed
->${tumor_1bed}
-for CHR in $CHROMS; do
-    CHROM=chr${CHR}
-    ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
-    cat ${ch_tumor_1bed} >> ${tumor_1bed}
-done
+if [[ ! -f ${tumor_1bed} ]]; then
+    for CHR in $CHROMS; do
+        CHROM=chr${CHR}
+        ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
+        if [[ -f ${ch_tumor_1bed} ]]; then
+            echo "${CHROM} exists"
+            continue
+        fi
+        tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
+        bcftools mpileup "${TUMOR_BAM}" -f "${REFERENCE}" \
+            -Ou -a AD,DP --skip-indels \
+            -q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" |
+            bcftools query \
+                -f "%CHROM\t%POS\t${SAMPLE}\t[%AD{0}\t%AD{1}]\n" \
+                -o "${ch_tumor_1bed}" &>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
+
+        while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
+            sleep 10
+        done
+    done
+    wait
+
+    >${tumor_1bed}
+    for CHR in $CHROMS; do
+        CHROM=chr${CHR}
+        ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
+        cat ${ch_tumor_1bed} >> ${tumor_1bed}
+    done
+else
+    echo "skip"
+fi
 
 ########################################
 echo "start phasing"
