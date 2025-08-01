@@ -20,7 +20,7 @@ def plot_likelihoods(ll_histories: list, out_file: str, info=""):
         "iteration": [i for _, history in enumerate(ll_histories) for i in range(len(history))],
         "loglik":    [ll for history in ll_histories for ll in history],
         "loglik-delta": loglik_diffs,
-        "restart":   [f"run{run_id+1}" for run_id, history in enumerate(ll_histories) for _ in history]
+        "restarts":   [f"run{run_id+1}" for run_id, history in enumerate(ll_histories) for _ in history]
     })
 
     fig, axes = plt.subplots(1, 2)
