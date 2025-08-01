@@ -30,7 +30,7 @@ def plot_likelihoods(ll_histories: list, out_file: str, info=""):
     fig.supxlabel("Iteration")
     fig.supylabel("Log-Likelihood")
     fig.tight_layout()
-    fig.savefig(out_file)
+    plt.savefig(out_file, dpi=150)
     plt.close(fig)
     return
 
