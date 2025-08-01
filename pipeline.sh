@@ -98,8 +98,8 @@ if [[ ! -f ${tumor_1bed} ]]; then
             continue
         fi
 
-        bcftools query -f '%CHROM\t%POS\n' \
-            -r "${CHROM}" ${snp_file} | gzip -9 > "${TMPDIR}/normal.${CHROM}.pos.gz"
+        bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_dir}/${CHROM}.vcf.gz" | \
+            gzip -9 > "${TMPDIR}/normal.${CHROM}.pos.gz"
 
         bcftools mpileup "${TUMOR_BAM}" -f "${REFERENCE}" \
             -Ou -a AD,DP --skip-indels \
