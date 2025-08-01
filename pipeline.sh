@@ -82,10 +82,6 @@ if [[ ! -f ${normal_1bed} ]]; then
             exit 1
         fi
         bcftools index -f ${snp_file}
-
-        tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
-        bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_file}" | gzip -9 > ${tgt_file}
-
         ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
         bcftools query -f '%CHROM\t%POS\tnormal\t[%AD{0}\t%AD{1}]\n' \
             "${snp_file}" \
@@ -108,6 +104,9 @@ if [[ ! -f ${tumor_1bed} ]]; then
             continue
         fi
         tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
+        bcftools index -f ${snp_file}
+        bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_file}" | gzip -9 > ${tgt_file}
+
         bcftools mpileup "${TUMOR_BAM}" -f "${REFERENCE}" \
             -Ou -a AD,DP --skip-indels \
             -q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" |
@@ -212,6 +211,12 @@ if [[ ! -f ${test_file} ]]; then
 else
     echo "skip"
 fi
+
+########################################
+echo "run cluster_bins python script"
+date
+bbc_dir="${OUTDIR}/bbc"
+# TODO
 
 echo "Done"
 date
