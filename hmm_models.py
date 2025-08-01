@@ -14,8 +14,7 @@ def make_transmat(diag, K):
 def plot_likelihoods(ll_histories: list, out_file: str, info=""):
     loglik_diffs = []
     for ll in ll_histories:
-        diffs = ll[1:] - ll[:-1]
-        loglik_diffs.extend([0] + list(diffs))
+        loglik_diffs.extend([0] + [a - b for (a,b) in zip(ll[1:], ll[:-1])])
 
     df = pd.DataFrame({
         "iteration": [i for _, history in enumerate(ll_histories) for i in range(len(history))],
