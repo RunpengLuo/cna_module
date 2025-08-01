@@ -75,7 +75,7 @@ def plot_1d2d(
     expected_bafs=None,
 ):
     os.makedirs(out_dir, exist_ok=True)
-    bin_file = os.path.join(bb_dir, "bin_position.tsv")
+    bin_file = os.path.join(bb_dir, "bin_position.tsv.gz")
     cov_matrix = os.path.join(bb_dir, "bin_matrix.cov.npz")
     baf_matrix = os.path.join(bb_dir, "bin_matrix.baf.npz")
     rdr_matrix = os.path.join(bb_dir, "bin_matrix.rdr_corr.npz")
