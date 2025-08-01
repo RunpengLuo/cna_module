@@ -13,23 +13,26 @@ TUMOR_BAM=
 # parameters
 MSR=
 MSPB=
-q=
-Q=
-d=
+q=0
+Q=11
+d=300
 CHROMS=$(seq 1 22)
 
 MAXJOBS=4
 
-REGION_BED=
-DB_SNP=
-REFERENCE=
+REGION_BED=/diskmnt/Users2/runpengl/data/chm12v2.0_region.bed
+DB_SNP=/diskmnt/Projects/ccRCC_longread/runpengl/vcf/chm13v2.0_dbSNPv155.vcf.gz
+REFERENCE=/diskmnt/Projects/ccRCC_longread/runpengl/reference/T2T-CHM13v2.0.fasta
 
 mkdir -p ${OUTDIR}
 mkdir -p ${TMPDIR}
 mkdir -p ${LOGDIR}
 
+echo ${SAMPLE}
+echo ${OUTDIR}
 ########################################
 echo "start genotyping on normal sample"
+date
 snp_dir="${OUTDIR}/snps"
 mkdir -p ${snp_dir}
 for CHR in $CHROMS; do
@@ -56,6 +59,7 @@ done
 wait
 
 echo "allele counting on normal sample"
+date
 for CHR in $CHROMS; do
     CHROM=chr${CHR}
     snp_file="${snp_dir}/${CHROM}.vcf.gz"
@@ -72,6 +76,7 @@ for CHR in $CHROMS; do
 done
 
 echo "allele counting on ${SAMPLE}"
+date
 for CHR in $CHROMS; do
     CHROM=chr${CHR}
     tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
@@ -96,6 +101,7 @@ wait
 
 ########################################
 echo "start phasing"
+date
 for CHR in $CHROMS; do
     CHROM=chr${CHR}
     phase_file=${TMPDIR}/${CHROM}.phased.vcf.gz
@@ -119,6 +125,7 @@ done
 
 ########################################
 echo "concat files"
+date
 baf_dir="${OUTDIR}/baf"
 phase_dir="${OUTDIR}/phase"
 mkdir -p ${baf_dir}
@@ -149,3 +156,4 @@ bcftools concat --file-list ${phase_list_file} -Ou \
 bcftools index -f ${phase_file}
 
 echo "Done"
+date
