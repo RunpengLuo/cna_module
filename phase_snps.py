@@ -14,6 +14,7 @@ def get_phasing_entropy(phases: np.ndarray, tol=10e-6):
     entropy = -phases * np.log(phases) - (1 - phases) * np.log(1 - phases)
     return entropy
 
+
 # def random_baf(alts: np.ndarray, refs: np.ndarray):
 #     totals = refs + alts
 #     totals_sum = np.sum(totals, axis=1)
@@ -38,19 +39,20 @@ def get_phasing_entropy(phases: np.ndarray, tol=10e-6):
 #     normal_entropy = get_phasing_entropy(phases)
 #     return tumor_entropy, normal_entropy, bafs[0]
 
+
 def multisample_em(alts, refs, start, mirror=True, tol=10e-6):
-    assert (
-        refs.shape == alts.shape
-    ), "Alternate and reference count arrays must have the same shape"
+    assert refs.shape == alts.shape, (
+        "Alternate and reference count arrays must have the same shape"
+    )
     # assert 0 < start <= 0.5, "Initial estimate must be in (0, 0.5]"
 
     totals = alts + refs
 
     n_samples, n_snps = alts.shape
     totals_sum = np.sum(totals, axis=1)
-    assert np.all(
-        totals_sum > 0
-    ), "Every bin must have >0 SNP-covering reads in each sample!"
+    assert np.all(totals_sum > 0), (
+        "Every bin must have >0 SNP-covering reads in each sample!"
+    )
 
     e_arr = np.zeros((2, n_snps))
 

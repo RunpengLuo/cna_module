@@ -6,9 +6,9 @@ import numpy as np
 import pysam
 
 
-
 def get_ord2chr(ch="chr"):
     return [f"{ch}{i}" for i in range(1, 23)] + [f"{ch}X", f"{ch}Y"]
+
 
 def get_chr2ord(ch):
     chr2ord = {}
@@ -18,12 +18,14 @@ def get_chr2ord(ch):
     chr2ord[f"{ch}Y"] = 24
     return chr2ord
 
+
 def sort_chroms(chromosomes: list):
     assert len(chromosomes) != 0
     chromosomes = [str(c) for c in chromosomes]
     ch = "chr" if str(chromosomes[0]).startswith("chr") else ""
     chr2ord = get_chr2ord(ch)
     return sorted(chromosomes, key=lambda x: chr2ord[x])
+
 
 def read_baf_file(baf_file: str):
     baf_df = pd.read_table(
@@ -59,7 +61,7 @@ def subset_baf(
 
 def read_VCF(vcf_file: str, phased=False):
     """
-    load vcf file as dataframe. 
+    load vcf file as dataframe.
     If phased, parse GT[0] as USEREF, check PS
     """
     fields = "%CHROM\t%POS"
@@ -90,7 +92,9 @@ def read_VCF(vcf_file: str, phased=False):
         snps = snps[(~snps["GT"].isna()) & snps["GT"].str.contains(r"\|", na=False)]
         snps["GT"] = snps["GT"].apply(func=lambda v: v[0])
         snps.loc[:, "GT"] = snps["GT"].astype("Int8")
-        snps.loc[~snps["GT"].isna(), "GT"] = 1 - snps.loc[~snps["GT"].isna(), "GT"] # USEREF
+        snps.loc[~snps["GT"].isna(), "GT"] = (
+            1 - snps.loc[~snps["GT"].isna(), "GT"]
+        )  # USEREF
         snps.loc[:, "PS"] = snps["PS"].astype("Int64")
     snps = snps.reset_index(drop=True)
     return snps

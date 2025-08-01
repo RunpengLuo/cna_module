@@ -7,6 +7,7 @@ from utils import *
 from phase_snps import *
 from plot_utils import plot_1d2d
 
+
 def adaptive_binning(
     snp_info: pd.DataFrame,
     dp_mat: np.ndarray,
@@ -57,7 +58,7 @@ def compute_mhBAF(
     nbins: int,
     nsamples: int,
     max_snps_per_block: int,
-    max_blocksize: int
+    max_blocksize: int,
 ):
     """
     TODO easy multithread
@@ -111,7 +112,9 @@ def compute_mhBAF(
                 # clean previous meta-SNP
                 if prev_num_snps > 0:
                     my_gts = gts[prev_start:i]
-                    meta_ref = refs[prev_start:i] * my_gts[:, None] + alts[prev_start:i] * (1 - my_gts[:, None])
+                    meta_ref = refs[prev_start:i] * my_gts[:, None] + alts[
+                        prev_start:i
+                    ] * (1 - my_gts[:, None])
                     meta_alt = tots[prev_start:i] - meta_ref
                     meta_refs.append(meta_ref)
                     meta_alts.append(meta_alt)
@@ -128,12 +131,15 @@ def compute_mhBAF(
                 prev_ps = -1
             else:
                 if prev_ps != -1:
-                    if (prev_num_snps >= max_snps_per_block
+                    if (
+                        prev_num_snps >= max_snps_per_block
                         or prev_blocksize >= max_blocksize
                         or (prev_ps != ps)
                     ):
                         my_gts = gts[prev_start:i]
-                        meta_ref = refs[prev_start:i] * my_gts[:, None] + alts[prev_start:i] * (1 - my_gts[:, None])
+                        meta_ref = refs[prev_start:i] * my_gts[:, None] + alts[
+                            prev_start:i
+                        ] * (1 - my_gts[:, None])
                         meta_alt = tots[prev_start:i] - meta_ref
                         meta_refs.append(meta_ref)
                         meta_alts.append(meta_alt)
@@ -143,17 +149,21 @@ def compute_mhBAF(
                         prev_num_snps = 1
                         prev_blocksize = bs
                         prev_ps = ps
-                    else: # extend meta-SNP
+                    else:  # extend meta-SNP
                         prev_num_snps += 1
                         prev_blocksize += bs
-                else: # init meta-SNP
+                else:  # init meta-SNP
                     prev_start = i
                     prev_num_snps = 1
                     prev_blocksize = bs
                     prev_ps = ps
-        if prev_start < nsnp_bin: # clean final meta-SNP
+        if prev_start < nsnp_bin:  # clean final meta-SNP
             my_gts = gts[prev_start:]
-            meta_ref = refs[prev_start:] * my_gts[:, None] + alts[prev_start:] + (1 - my_gts[:, None])
+            meta_ref = (
+                refs[prev_start:] * my_gts[:, None]
+                + alts[prev_start:]
+                + (1 - my_gts[:, None])
+            )
             meta_alt = tots[prev_start:] - meta_ref
             meta_refs.append(meta_ref)
             meta_alts.append(meta_alt)
@@ -163,19 +173,22 @@ def compute_mhBAF(
         # meta-snps, sample by #SNP
         refs = np.vstack(meta_refs).astype(np.int32).T
         alts = np.vstack(meta_alts).astype(np.int32).T
-        
+
         # TODO don't do mhBAF here?
         runs = {
-            b: multisample_em(alts[1:], refs[1:], b, mirror=True) for b in np.arange(0.05, 0.55, 0.05)
+            b: multisample_em(alts[1:], refs[1:], b, mirror=True)
+            for b in np.arange(0.05, 0.55, 0.05)
         }
         # runs = {
         #     b: multisample_em(alts[1:], refs[1:], b, mirror=False) for b in np.arange(0.05, 1.00, 0.05)
         # }
         bafs, phases, ll = max(runs.values(), key=lambda x: x[-1])
-        snp_info.loc[snp_bin_idx, "PHASE"] = phases[meta_ids] * gts + (1 - phases[meta_ids]) * (1 - gts)
-        
+        snp_info.loc[snp_bin_idx, "PHASE"] = phases[meta_ids] * gts + (
+            1 - phases[meta_ids]
+        ) * (1 - gts)
+
         # mean ENTROPY of phasing posterior
-        snp_info.loc[snp_bin_idx, "ENTROPY"] = get_phasing_entropy(phases)[meta_ids] 
+        snp_info.loc[snp_bin_idx, "ENTROPY"] = get_phasing_entropy(phases)[meta_ids]
 
         totals = np.sum(refs + alts, axis=1)
         bAlleles = refs @ phases + alts @ (1 - phases)
@@ -281,7 +294,14 @@ if __name__ == "__main__":
     snp_info["PHASE"] = 0.0
     snp_info["ENTROPY"] = 0.0
     cov_mat, baf_mat, alpha_mat, beta_mat = compute_mhBAF(
-        snp_info, ref_mat, alt_mat, dp_mat, nbins, nsamples, max_snps_per_block, max_blocksize
+        snp_info,
+        ref_mat,
+        alt_mat,
+        dp_mat,
+        nbins,
+        nsamples,
+        max_snps_per_block,
+        max_blocksize,
     )
 
     # bin by sample matrix
@@ -300,8 +320,13 @@ if __name__ == "__main__":
     print("build bb dataframe")
     # build bb dataframe and compute RDR
     # per-sample bb-row for later steps, maybe improved speed via RD matrix instead.
-    snp_info.to_csv(out_snp_file, sep="\t", header=True, index=False,
-                    columns=["#CHR", "START", "END", "POS", "bin_id", "PHASE", "ENTROPY"])
+    snp_info.to_csv(
+        out_snp_file,
+        sep="\t",
+        header=True,
+        index=False,
+        columns=["#CHR", "START", "END", "POS", "bin_id", "PHASE", "ENTROPY"],
+    )
 
     snp_grp_bins = snp_info.groupby(by="bin_id", sort=False, as_index=True)
 
@@ -313,8 +338,13 @@ if __name__ == "__main__":
         }
     )
     snp_bins.loc[:, "#SNP"] = snp_grp_bins.size().reset_index(drop=True)
-    snp_bins.to_csv(out_bin_file, sep="\t", header=True, index=False,
-                    columns=["#CHR", "START", "END", "#SNP"])
+    snp_bins.to_csv(
+        out_bin_file,
+        sep="\t",
+        header=True,
+        index=False,
+        columns=["#CHR", "START", "END", "#SNP"],
+    )
 
     bb_df = pd.DataFrame(
         {
@@ -343,12 +373,12 @@ if __name__ == "__main__":
 
     # plot RDR and BAF scatter
     plot_1d2d(
-        out_dir, 
-        out_dir, 
-        out_prefix="", 
-        plot_normal=True, 
+        out_dir,
+        out_dir,
+        out_prefix="",
+        plot_normal=True,
         clusters=None,
         expected_rdrs=None,
-        expected_bafs=None
+        expected_bafs=None,
     )
     sys.exit(0)

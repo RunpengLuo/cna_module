@@ -13,6 +13,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from utils import *
 
+
 def build_ch_boundary(bb: pd.DataFrame):
     chrs = sort_chroms(bb["#CHR"].unique().tolist())
     chr_sizes = OrderedDict()
@@ -30,7 +31,9 @@ def build_ch_boundary(bb: pd.DataFrame):
             offset = chr_offsets[prev_ch] + chr_sizes[prev_ch]
             chr_offsets[ch] = offset
     chr_end = chr_offsets[chrs[-1]] + chr_sizes[chrs[-1]] + chr_shift
-    chr_bounds = list(chr_offsets.values()) + [chr_offsets[chrs[-1]] + chr_sizes[chrs[-1]]]
+    chr_bounds = list(chr_offsets.values()) + [
+        chr_offsets[chrs[-1]] + chr_sizes[chrs[-1]]
+    ]
 
     # infer chromosome-gaps from SEG file
     chr_gaps = OrderedDict()
@@ -61,9 +64,21 @@ def build_ch_boundary(bb: pd.DataFrame):
     bb_positions = bb.apply(
         func=lambda r: chr_offsets[r["#CHR"]] + (r.START + r.END) // 2, axis=1
     ).to_numpy()
-    bb_starts = bb.apply(func=lambda r: chr_offsets[r["#CHR"]] + r.START, axis=1).to_numpy()
+    bb_starts = bb.apply(
+        func=lambda r: chr_offsets[r["#CHR"]] + r.START, axis=1
+    ).to_numpy()
     bb_ends = bb.apply(func=lambda r: chr_offsets[r["#CHR"]] + r.END, axis=1).to_numpy()
-    return bb_positions, bb_starts, bb_ends, chr_bounds, chr_gaps, chr_end, xlab_chrs, xtick_chrs
+    return (
+        bb_positions,
+        bb_starts,
+        bb_ends,
+        chr_bounds,
+        chr_gaps,
+        chr_end,
+        xlab_chrs,
+        xtick_chrs,
+    )
+
 
 def plot_1d2d(
     bb_dir: str,
@@ -90,7 +105,16 @@ def plot_1d2d(
 
     ########################################
     ret = build_ch_boundary(bb)
-    bb_positions, bb_starts, bb_ends, chr_bounds, chr_gaps, chr_end, xlab_chrs, xtick_chrs = ret
+    (
+        bb_positions,
+        bb_starts,
+        bb_ends,
+        chr_bounds,
+        chr_gaps,
+        chr_end,
+        xlab_chrs,
+        xtick_chrs,
+    ) = ret
 
     sns.set_style("whitegrid")
     if clusters is None:
@@ -188,10 +212,12 @@ def plot_1d2d(
                     s=markersize,
                     color=colors_,
                     hue=clusters_hue,
-                    palette=palette
+                    palette=palette,
                 )
                 axes[0].legend(markerscale=6)
-                sns.move_legend(axes[0], "upper left", bbox_to_anchor=(1, 1), title=None)
+                sns.move_legend(
+                    axes[0], "upper left", bbox_to_anchor=(1, 1), title=None
+                )
             else:
                 g = sns.scatterplot(
                     x=bb_positions, y=y, ax=axes[ai], s=markersize, color=colors_
@@ -283,5 +309,3 @@ def plot_1d2d(
         fig.savefig(out1d, dpi=300, format="png")
         plt.close(fig)
     return
-
-

@@ -124,6 +124,7 @@ def run_mosdepth(
         mos_files.append(mos_file)
     return mos_files
 
+
 if __name__ == "__main__":
     ##################################################
     args = sys.argv
@@ -186,7 +187,13 @@ if __name__ == "__main__":
 
     ##################################################
     snp_info = assign_snp_bounderies(pivot_snps, regions)
-    snp_info.to_csv(out_snp_file, sep="\t", header=True, index=False, columns=["#CHR", "START", "END", "POS"])
+    snp_info.to_csv(
+        out_snp_file,
+        sep="\t",
+        header=True,
+        index=False,
+        columns=["#CHR", "START", "END", "POS"],
+    )
     snp_info.to_csv(
         out_bed_file,
         columns=["#CHR", "START", "END"],
