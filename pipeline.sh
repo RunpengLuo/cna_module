@@ -31,6 +31,8 @@ REGION_BED=/diskmnt/Users2/runpengl/data/chm12v2.0_region.bed
 DB_SNP=/diskmnt/Projects/ccRCC_longread/runpengl/vcf/chm13v2.0_dbSNPv155.vcf.gz
 REFERENCE=/diskmnt/Projects/ccRCC_longread/runpengl/reference/T2T-CHM13v2.0.fasta
 
+SCRIPT_DIR=
+
 mkdir -p ${OUTDIR}
 mkdir -p ${TMPDIR}
 mkdir -p ${LOGDIR}
@@ -188,7 +190,7 @@ rdr_dir="${OUTDIR}/rdr"
 mkdir -p ${rdr_dir}
 test_file=${rdr_dir}/sample_ids.tsv
 if [[ ! -f ${test_file} ]]; then
-    python count_reads.py ${SAMPLE} ${REGION_BED} ${baf_dir} ${rdr_dir} ${NORMAL_BAM} ${TUMOR_BAM}
+    python ${SCRIPT_DIR}/count_reads.py ${SAMPLE} ${REGION_BED} ${baf_dir} ${rdr_dir} ${NORMAL_BAM} ${TUMOR_BAM}
 else
     echo "skip"
 fi
@@ -200,7 +202,7 @@ bb_dir="${OUTDIR}/bb"
 mkdir -p ${bb_dir}
 test_file=${bb_dir}/sample_ids.tsv
 if [[ ! -f ${test_file} ]]; then
-    python combine_counts.py ${phase_file} ${rdr_dir} ${bb_dir} \
+    python ${SCRIPT_DIR}/combine_counts.py ${phase_file} ${rdr_dir} ${bb_dir} \
         ${MSR} ${MTR} ${READ_LENGTH} ${MSPB} ${MBS}
 else
     echo "skip"
