@@ -16,6 +16,7 @@ MSPB=
 q=0
 Q=11
 d=300
+mincov=5
 CHROMS=$(seq 1 22)
 
 MAXJOBS=4
@@ -50,7 +51,7 @@ for CHR in $CHROMS; do
     -q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" | \
     bcftools call -m -Ou | \
     bcftools view -v snps -g het -m2 -M2 \
-        -i "FMT/DP>=${mincov}" -Oz -o ${snp_file} &>"${LOGDIR}/genotype.${CHROM}.log" &
+        -i "FMT/DP>=${mincov}" -Oz -o ${snp_file} 1>"${LOGDIR}/genotype.${CHROM}.log" &
 
     while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
         sleep 10
@@ -66,12 +67,14 @@ for CHR in $CHROMS; do
     if [[ ! -f ${snp_file} ]]; then
         exit 1
     fi
+    bcftools index -f ${snp_file}
+
     tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
     bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_file}" | gzip -9 > ${tgt_file}
 
     normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
     bcftools query -f '%CHROM\t%POS\tnormal\t[%AD{0}\t%AD{1}]\n' \
-		"${vcf_file_final}" \
+		"${snp_file}" \
 		-o "${normal_1bed}"
 done
 
@@ -90,7 +93,7 @@ for CHR in $CHROMS; do
 		-q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" |
 		bcftools query \
 			-f "%CHROM\t%POS\t${SAMPLE}\t[%AD{0}\t%AD{1}]\n" \
-			-o "${tumor_1bed}" &>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
+			-o "${tumor_1bed}" 1>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
 
     while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
         sleep 10
@@ -116,7 +119,7 @@ for CHR in $CHROMS; do
         --output-vcf ${phase_file} \
         --reference ${reference} \
         --threads 2 \
-        --ignore-read-groups &>"${LOGDIR}/hiphase.${CHROM}.log" &
+        --ignore-read-groups 1>"${LOGDIR}/hiphase.${CHROM}.log" &
     
     while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
         sleep 10
