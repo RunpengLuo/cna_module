@@ -103,7 +103,7 @@ if [[ ! -f ${tumor_1bed} ]]; then
 
         bcftools mpileup "${TUMOR_BAM}" -f "${REFERENCE}" \
             -Ou -a AD,DP --skip-indels \
-            -q ${q} -Q ${Q} -d ${d} -T "${TMPDIR}/normal.${CHROM}.pos.gz" |
+            -q ${q} -Q ${Q} -d ${d} -T "${TMPDIR}/normal.${CHROM}.pos.gz" | \
             bcftools query \
                 -f "%CHROM\t%POS\t${SAMPLE}\t[%AD{0}\t%AD{1}]\n" \
                 -o "${ch_tumor_1bed}" &>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
@@ -162,8 +162,7 @@ if [[ ! -f ${phase_file} ]]; then
         echo "${TMPDIR}/${CHROM}.phased.vcf.gz" >> ${phase_list_file}
     done
 
-    bcftools concat --file-list ${phase_list_file} -Ou \
-        | bcftools sort -Oz -o ${phase_file}
+    bcftools concat --file-list ${phase_list_file} -Ou | bcftools sort -Oz -o ${phase_file}
     bcftools index -f ${phase_file}
 else
     echo "skip"
