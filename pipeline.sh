@@ -31,7 +31,7 @@ REGION_BED=/diskmnt/Users2/runpengl/data/chm12v2.0_region.bed
 DB_SNP=/diskmnt/Projects/ccRCC_longread/runpengl/vcf/chm13v2.0_dbSNPv155.vcf.gz
 REFERENCE=/diskmnt/Projects/ccRCC_longread/runpengl/reference/T2T-CHM13v2.0.fasta
 
-SCRIPT_DIR=
+SCRIPT_DIR=/diskmnt/Users2/runpengl/cna_module
 
 mkdir -p ${OUTDIR}
 mkdir -p ${TMPDIR}
