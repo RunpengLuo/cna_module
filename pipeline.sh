@@ -51,12 +51,11 @@ for CHR in $CHROMS; do
         echo "${CHROM} exists, skip"
         continue
     fi
-    tgt_file="${TMPDIR}/target.${CHROM}.pos.gz"
-    bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${DB_SNP}" | gzip -9 > ${tgt_file}
+    bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${DB_SNP}" | gzip -9 > "${TMPDIR}/target.${CHROM}.pos.gz"
     
     bcftools mpileup "${NORMAL_BAM}" -f "${REFERENCE}" \
     -Ou -a INFO/AD,AD,DP --skip-indels \
-    -q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" | \
+    -q ${q} -Q ${Q} -d ${d} -T "${TMPDIR}/target.${CHROM}.pos.gz" | \
     bcftools call -m -Ou | \
     bcftools view -v snps -g het -m2 -M2 \
         -i "FMT/DP>=${mincov}" -Oz -o ${snp_file} &>"${LOGDIR}/genotype.${CHROM}.log" &
@@ -77,16 +76,11 @@ if [[ ! -f ${normal_1bed} ]]; then
     >${normal_1bed}
     for CHR in $CHROMS; do
         CHROM=chr${CHR}
-        snp_file="${snp_dir}/${CHROM}.vcf.gz"
-        if [[ ! -f ${snp_file} ]]; then
-            exit 1
-        fi
-        bcftools index -f ${snp_file}
-        ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
+        bcftools index -f "${snp_dir}/${CHROM}.vcf.gz"
         bcftools query -f '%CHROM\t%POS\tnormal\t[%AD{0}\t%AD{1}]\n' \
-            "${snp_file}" \
-            -o "${ch_normal_1bed}"
-        cat ${ch_normal_1bed} >> ${normal_1bed}
+            "${snp_dir}/${CHROM}.vcf.gz" \
+            -o "${TMPDIR}/normal.${CHROM}.1bed"
+        cat "${TMPDIR}/normal.${CHROM}.1bed" >> ${normal_1bed}
     done
 else
     echo "skip"
@@ -103,13 +97,13 @@ if [[ ! -f ${tumor_1bed} ]]; then
             echo "${CHROM} exists"
             continue
         fi
-        tgt_file="${TMPDIR}/normal.${CHROM}.pos.gz"
-        bcftools index -f ${snp_file}
-        bcftools query -f '%CHROM\t%POS\n' -r "${CHROM}" "${snp_file}" | gzip -9 > ${tgt_file}
+
+        bcftools query -f '%CHROM\t%POS\n' \
+            -r "${CHROM}" ${snp_file} | gzip -9 > "${TMPDIR}/normal.${CHROM}.pos.gz"
 
         bcftools mpileup "${TUMOR_BAM}" -f "${REFERENCE}" \
             -Ou -a AD,DP --skip-indels \
-            -q ${q} -Q ${Q} -d ${d} -T "${tgt_file}" |
+            -q ${q} -Q ${Q} -d ${d} -T "${TMPDIR}/normal.${CHROM}.pos.gz" |
             bcftools query \
                 -f "%CHROM\t%POS\t${SAMPLE}\t[%AD{0}\t%AD{1}]\n" \
                 -o "${ch_tumor_1bed}" &>"${LOGDIR}/count.${SAMPLE}.${CHROM}.log" &
@@ -123,8 +117,7 @@ if [[ ! -f ${tumor_1bed} ]]; then
     >${tumor_1bed}
     for CHR in $CHROMS; do
         CHROM=chr${CHR}
-        ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
-        cat ${ch_tumor_1bed} >> ${tumor_1bed}
+        cat "${TMPDIR}/${SAMPLE}.${CHROM}.1bed" >> ${tumor_1bed}
     done
 else
     echo "skip"
@@ -140,7 +133,6 @@ if [[ ! -f ${phase_file} ]]; then
     for CHR in $CHROMS; do
         CHROM=chr${CHR}
         ch_phase_file=${TMPDIR}/${CHROM}.phased.vcf.gz
-        snp_file="${snp_dir}/${CHROM}.vcf.gz"
         if [[ -f ${ch_phase_file} ]]; then
             echo "${CHROM} exists"
             continue
@@ -148,10 +140,11 @@ if [[ ! -f ${phase_file} ]]; then
         hiphase \
             --bam ${NORMAL_BAM} \
             --reference ${REFERENCE} \
-            --vcf ${snp_file} \
+            --vcf "${snp_dir}/${CHROM}.vcf.gz" \
             --output-vcf ${ch_phase_file} \
             --threads 2 \
-            --ignore-read-groups &>"${LOGDIR}/hiphase.${CHROM}.log" &
+            --ignore-read-groups \
+            --csi-index &>"${LOGDIR}/hiphase.${CHROM}.log" &
         
         while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
             sleep 10
@@ -166,9 +159,7 @@ if [[ ! -f ${phase_file} ]]; then
 
     for CHR in $CHROMS; do
         CHROM=chr${CHR}
-        ch_phase_file="${TMPDIR}/${CHROM}.phased.vcf.gz"
-        bcftools index -f ${ch_phase_file}
-        echo "${ch_phase_file}" >> ${phase_list_file}
+        echo "${TMPDIR}/${CHROM}.phased.vcf.gz" >> ${phase_list_file}
     done
 
     bcftools concat --file-list ${phase_list_file} -Ou \
@@ -213,7 +204,7 @@ else
 fi
 
 ########################################
-echo "run cluster_bins python script"
+echo "run cluster_bins python script TODO"
 date
 bbc_dir="${OUTDIR}/bbc"
 # TODO
