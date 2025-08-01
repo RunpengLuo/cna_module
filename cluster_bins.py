@@ -130,7 +130,6 @@ if __name__ == "__main__":
         all_bics[K] = my_best_model.bic(X)
 
         # if mhBAF is not imposed during binning, we can do it here TODO
-
         # compute expected RDR and BAF for each K
         expected_rdr = np.zeros((K, nsamples), dtype=np.float64)
         expected_baf = np.zeros((K, nsamples + 1), dtype=np.float64)
@@ -141,7 +140,7 @@ if __name__ == "__main__":
         expected_rdrs.append(expected_rdr)
         expected_bafs.append(expected_baf)
         plot_1d2d(
-            bb_dir, out_dir, f"K{K}_", False, all_labels[K], expected_rdr, expected_baf
+            bb_dir, out_dir, f"K{K}_", True, all_labels[K], expected_rdr, expected_baf
         )
 
     opt_K = np.argmin(all_bics)
@@ -150,5 +149,7 @@ if __name__ == "__main__":
     print("Optimal K:", opt_K)
     print("Optimal BIC:", all_bics[opt_K])
     print("BICs:", all_bics[minK : maxK + 1])
+
+    # we can compute cluster variance here,
 
     # elbow_bic(minK, maxK, all_bics, "bic", out_dir)

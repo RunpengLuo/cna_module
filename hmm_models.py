@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 from scipy.special import logsumexp
 from hmmlearn.hmm import GMMHMM, GaussianHMM
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 def make_transmat(diag, K):
     offdiag = (1 - diag) / (K - 1)
@@ -10,14 +12,25 @@ def make_transmat(diag, K):
     return transmat_
 
 def plot_likelihoods(ll_histories: list, out_file: str, info=""):
-    fig = plt.figure(figsize=(8, 6))
-    for i, history in enumerate(ll_histories):
-        plt.plot(history, marker="o", label=f"Restart {i+1}", alpha=0.7)
-    plt.xlabel("Iteration")
-    plt.ylabel("Log Likelihood")
-    plt.title(f"HMM Convergence Plot {info}")
-    plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
-    plt.tight_layout()
+    loglik_diffs = []
+    for ll in ll_histories:
+        diffs = ll[1:] - ll[:-1]
+        loglik_diffs.extend([0] + list(diffs))
+
+    df = pd.DataFrame({
+        "iteration": [i for _, history in enumerate(ll_histories) for i in range(len(history))],
+        "loglik":    [ll for history in ll_histories for ll in history],
+        "loglik-delta": loglik_diffs,
+        "restart":   [f"run{run_id+1}" for run_id, history in enumerate(ll_histories) for _ in history]
+    })
+
+    fig, axes = plt.subplots(1, 2)
+    sns.lineplot(data=df, x="iteration", y="loglik", hue="restarts", style="restarts", ax=axes[0])
+    sns.lineplot(data=df, x="iteration", y="loglik-delta", hue="restarts", style="restarts", ax=axes[1])
+    fig.suptitle(f"Convergence across restarts {info}")
+    fig.supxlabel("Iteration")
+    fig.supylabel("Log-Likelihood")
+    fig.tight_layout()
     fig.savefig(out_file)
     plt.close(fig)
     return
