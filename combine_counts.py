@@ -238,7 +238,7 @@ if __name__ == "__main__":
     out_alpha_mat = os.path.join(out_dir, "bin_matrix.alpha.npz")
     out_beta_mat = os.path.join(out_dir, "bin_matrix.beta.npz")
     out_bb_file = os.path.join(out_dir, "bulk.bb")
-    out_bin_file = os.path.join(out_dir, "bin_position.tsv")
+    out_bin_file = os.path.join(out_dir, "bin_position.tsv.gz")
     out_snp_file = os.path.join(out_dir, "phased_snps.tsv.gz")
 
     ##################################################
