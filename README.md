@@ -21,3 +21,8 @@ count reads + combine counts
 1. 1-based bb file
 
 # cna_module
+
+
+## Final output
+1. bulk.bbc
+2. bulk.seg
