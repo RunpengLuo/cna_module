@@ -216,7 +216,11 @@ def compute_RDR(
 
 if __name__ == "__main__":
     ##################################################
-    _, phase_file, rdr_dir, out_dir, msr, mspb = sys.argv
+    args = sys.argv
+    print(args)
+    _, phase_file, rdr_dir, out_dir = args[:4]
+    msr, mtr, read_length, max_snps_per_block, max_blocksize = list(map(int, args[4:]))
+    mrd = mtr * read_length
 
     sample_file = os.path.join(rdr_dir, "sample_ids.tsv")
     snp_ifile = os.path.join(rdr_dir, "snp_info.tsv.gz")
@@ -240,14 +244,6 @@ if __name__ == "__main__":
     out_bb_file = os.path.join(out_dir, "bulk.bb")
     out_bin_file = os.path.join(out_dir, "bin_position.tsv.gz")
     out_snp_file = os.path.join(out_dir, "phased_snps.tsv.gz")
-
-    ##################################################
-    msr = int(msr)
-    mtr = 30
-    read_length = 10000
-    mrd = mtr * read_length
-    max_blocksize = 1e6
-    max_snps_per_block = int(mspb)
 
     ##################################################
     print("load arguments")

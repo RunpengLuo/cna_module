@@ -130,6 +130,7 @@ if __name__ == "__main__":
     print(args)
     _, sample, region_file, baf_dir, out_dir = args[:5]
     bams = args[5:]
+    assert len(bams) == 2
     samples = ["normal", sample]
 
     nbaf_file = os.path.join(baf_dir, "normal.1bed")

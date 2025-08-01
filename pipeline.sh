@@ -22,7 +22,7 @@ MSR=7500
 MTR=30
 READ_LENGTH=10000
 MSPB=20
-MAXB=1000000
+MBS=1000000
 
 # general parameters
 MAXJOBS=4
@@ -132,51 +132,79 @@ fi
 ########################################
 echo "start phasing"
 date
-for CHR in $CHROMS; do
-    CHROM=chr${CHR}
-    phase_file=${TMPDIR}/${CHROM}.phased.vcf.gz
-    snp_file="${snp_dir}/${CHROM}.vcf.gz"
-    if [[ -f ${phase_file} ]]; then
-        echo "${CHROM} exists"
-        continue
-    fi
-    hiphase \
-        --bam ${NORMAL_BAM} \
-        --reference ${REFERENCE} \
-        --vcf ${snp_file} \
-        --output-vcf ${phase_file} \
-        --threads 2 \
-        --ignore-read-groups &>"${LOGDIR}/hiphase.${CHROM}.log" &
-    
-    while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
-        sleep 10
-    done
-done
-
-########################################
-echo "concat phasing files"
-date
 phase_dir="${OUTDIR}/phase"
 mkdir -p ${phase_dir}
-
-phase_list_file=${TMPDIR}/phase.list
->${phase_list_file}
-
-for CHR in $CHROMS; do
-    CHROM=chr${CHR}
-    ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
-    ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
-    ch_phase_file="${TMPDIR}/${CHROM}.phased.vcf.gz"
-    cat ${ch_normal_1bed} >> ${normal_1bed}
-    cat ${ch_tumor_1bed} >> ${tumor_1bed}
-    bcftools index -f ${ch_phase_file}
-    echo "${ch_phase_file}" >> ${phase_list_file}
-done
-
 phase_file=${phase_dir}/phased.vcf.gz
-bcftools concat --file-list ${phase_list_file} -Ou \
-    | bcftools sort -Oz -o ${phase_file}
-bcftools index -f ${phase_file}
+if [[ ! -f ${phase_file} ]]; then
+    for CHR in $CHROMS; do
+        CHROM=chr${CHR}
+        phase_file=${TMPDIR}/${CHROM}.phased.vcf.gz
+        snp_file="${snp_dir}/${CHROM}.vcf.gz"
+        if [[ -f ${phase_file} ]]; then
+            echo "${CHROM} exists"
+            continue
+        fi
+        hiphase \
+            --bam ${NORMAL_BAM} \
+            --reference ${REFERENCE} \
+            --vcf ${snp_file} \
+            --output-vcf ${phase_file} \
+            --threads 2 \
+            --ignore-read-groups &>"${LOGDIR}/hiphase.${CHROM}.log" &
+        
+        while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
+            sleep 10
+        done
+    done
+
+    echo "concat phasing files"
+    date
+
+    phase_list_file=${TMPDIR}/phase.list
+    >${phase_list_file}
+
+    for CHR in $CHROMS; do
+        CHROM=chr${CHR}
+        ch_normal_1bed="${TMPDIR}/normal.${CHROM}.1bed"
+        ch_tumor_1bed="${TMPDIR}/${SAMPLE}.${CHROM}.1bed"
+        ch_phase_file="${TMPDIR}/${CHROM}.phased.vcf.gz"
+        cat ${ch_normal_1bed} >> ${normal_1bed}
+        cat ${ch_tumor_1bed} >> ${tumor_1bed}
+        bcftools index -f ${ch_phase_file}
+        echo "${ch_phase_file}" >> ${phase_list_file}
+    done
+
+    bcftools concat --file-list ${phase_list_file} -Ou \
+        | bcftools sort -Oz -o ${phase_file}
+    bcftools index -f ${phase_file}
+else
+    echo "skip"
+fi
+
+########################################
+echo "run count_reads python script"
+date
+rdr_dir="${OUTDIR}/rdr"
+mkdir -p ${rdr_dir}
+test_file=${rdr_dir}/sample_ids.tsv
+if [[ ! -f ${test_file} ]]; then
+    python count_reads.py ${SAMPLE} ${REGION_BED} ${baf_dir} ${rdr_dir} ${NORMAL_BAM} ${TUMOR_BAM}
+else
+    echo "skip"
+fi
+
+########################################
+echo "run combine_counts python script"
+date
+bb_dir="${OUTDIR}/bb"
+mkdir -p ${bb_dir}
+test_file=${bb_dir}/sample_ids.tsv
+if [[ ! -f ${test_file} ]]; then
+    python combine_counts.py ${phase_file} ${rdr_dir} ${bb_dir} \
+        ${MSR} ${MTR} ${READ_LENGTH} ${MSPB} ${MBS}
+else
+    echo "skip"
+fi
 
 echo "Done"
 date
