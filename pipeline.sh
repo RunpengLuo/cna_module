@@ -139,9 +139,9 @@ phase_file=${phase_dir}/phased.vcf.gz
 if [[ ! -f ${phase_file} ]]; then
     for CHR in $CHROMS; do
         CHROM=chr${CHR}
-        phase_file=${TMPDIR}/${CHROM}.phased.vcf.gz
+        ch_phase_file=${TMPDIR}/${CHROM}.phased.vcf.gz
         snp_file="${snp_dir}/${CHROM}.vcf.gz"
-        if [[ -f ${phase_file} ]]; then
+        if [[ -f ${ch_phase_file} ]]; then
             echo "${CHROM} exists"
             continue
         fi
@@ -149,7 +149,7 @@ if [[ ! -f ${phase_file} ]]; then
             --bam ${NORMAL_BAM} \
             --reference ${REFERENCE} \
             --vcf ${snp_file} \
-            --output-vcf ${phase_file} \
+            --output-vcf ${ch_phase_file} \
             --threads 2 \
             --ignore-read-groups &>"${LOGDIR}/hiphase.${CHROM}.log" &
         
