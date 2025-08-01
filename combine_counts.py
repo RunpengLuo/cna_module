@@ -5,7 +5,7 @@ import pandas as pd
 
 from utils import *
 from phase_snps import *
-
+from plot_utils import plot_1d2d
 
 def adaptive_binning(
     snp_info: pd.DataFrame,
@@ -340,3 +340,15 @@ if __name__ == "__main__":
 
     # convert to 1-bed?
     bb_df.to_csv(out_bb_file, sep="\t", header=True, index=False)
+
+    # plot RDR and BAF scatter
+    plot_1d2d(
+        out_dir, 
+        out_dir, 
+        out_prefix="", 
+        plot_normal=True, 
+        clusters=None,
+        expected_rdrs=None,
+        expected_bafs=None
+    )
+    sys.exit(0)

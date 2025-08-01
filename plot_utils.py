@@ -66,7 +66,7 @@ def build_ch_boundary(bb: pd.DataFrame):
     return bb_positions, bb_starts, bb_ends, chr_bounds, chr_gaps, chr_end, xlab_chrs, xtick_chrs
 
 def plot_1d2d(
-    run_dir: str,
+    bb_dir: str,
     out_dir: str,
     out_prefix="",
     plot_normal=False,
@@ -75,9 +75,6 @@ def plot_1d2d(
     expected_bafs=None,
 ):
     os.makedirs(out_dir, exist_ok=True)
-
-    bb_dir = os.path.join(run_dir, "bb")
-
     bin_file = os.path.join(bb_dir, "bin_position.tsv")
     cov_matrix = os.path.join(bb_dir, "bin_matrix.cov.npz")
     baf_matrix = os.path.join(bb_dir, "bin_matrix.baf.npz")
