@@ -11,7 +11,7 @@ def make_transmat(diag, K):
 
 def plot_likelihoods(ll_histories: list, out_file: str, info=""):
     fig = plt.figure(figsize=(8, 6))
-    for i, history in ll_histories:
+    for i, history in enumerate(ll_histories):
         plt.plot(history, marker="o", label=f"Restart {i+1}", alpha=0.7)
     plt.xlabel("Iteration")
     plt.ylabel("Log Likelihood")

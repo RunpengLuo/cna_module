@@ -122,7 +122,6 @@ def plot_1d2d(
     clusters = clusters.astype(np.int32)
     clusters_hue = clusters + 1
     cluster_ids = np.unique(clusters).astype(np.int32)
-    print(cluster_ids)
     num_cluster = len(cluster_ids)
     if num_cluster > 8:
         palette = sns.color_palette("husl", n_colors=num_cluster)
