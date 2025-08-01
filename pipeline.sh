@@ -190,7 +190,13 @@ rdr_dir="${OUTDIR}/rdr"
 mkdir -p ${rdr_dir}
 test_file=${rdr_dir}/sample_ids.tsv
 if [[ ! -f ${test_file} ]]; then
-    python ${SCRIPT_DIR}/count_reads.py ${SAMPLE} ${REGION_BED} ${baf_dir} ${rdr_dir} ${NORMAL_BAM} ${TUMOR_BAM}
+    python -u ${SCRIPT_DIR}/count_reads.py \
+        ${SAMPLE} \
+        ${REGION_BED} \
+        ${baf_dir} \
+        ${rdr_dir} \
+        ${NORMAL_BAM} \
+        ${TUMOR_BAM}
 else
     echo "skip"
 fi
@@ -202,7 +208,10 @@ bb_dir="${OUTDIR}/bb"
 mkdir -p ${bb_dir}
 test_file=${bb_dir}/sample_ids.tsv
 if [[ ! -f ${test_file} ]]; then
-    python ${SCRIPT_DIR}/combine_counts.py ${phase_file} ${rdr_dir} ${bb_dir} \
+    python -u ${SCRIPT_DIR}/combine_counts.py \
+        ${phase_file} \
+        ${rdr_dir} \
+        ${bb_dir} \
         ${MSR} ${MTR} ${READ_LENGTH} ${MSPB} ${MBS}
 else
     echo "skip"
