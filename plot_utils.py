@@ -21,7 +21,7 @@ def build_ch_boundary(bb: pd.DataFrame):
         chr_sizes[ch] = bb.loc[bb["#CHR"] == ch, "END"].max()
 
     # get 1d plot chromosome offsets
-    chr_shift = int(20e6)  # slightly shift chr1 to right
+    chr_shift = int(5e6)  # slightly shift chr1 to right
     chr_offsets = OrderedDict()
     for i, ch in enumerate(chrs):
         if i == 0:
