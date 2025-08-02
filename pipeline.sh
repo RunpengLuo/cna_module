@@ -22,7 +22,7 @@ MSR=7500
 MTR=30
 READ_LENGTH=10000
 MSPB=20
-MBS=1000000
+MBS=1000000 #1e6
 
 # general parameters
 MAXJOBS=4
@@ -209,5 +209,6 @@ date
 bbc_dir="${OUTDIR}/bbc"
 # TODO
 
+rm -rf ${TMPDIR}
 echo "Done"
 date
