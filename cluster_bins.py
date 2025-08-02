@@ -121,10 +121,6 @@ if __name__ == "__main__":
                 my_best_ll = prob
                 my_best_model = model
 
-        # plot likelihoods
-        out_ll_file = os.path.join(out_dir, f"LL-{K}.png")
-        plot_likelihoods(ll_histories, out_ll_file, f"K={K}")
-
         all_labels[K, :] = my_best_labels.astype(np.int32)
         all_models.append(my_best_model)
         all_bics[K] = my_best_model.bic(X)
