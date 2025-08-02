@@ -150,6 +150,7 @@ if [[ ! -f ${phase_file} ]]; then
             sleep 10
         done
     done
+    wait
 
     echo "concat phasing files"
     date
