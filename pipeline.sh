@@ -5,8 +5,8 @@ set -euo pipefail
 # input
 SAMPLE=
 OUTDIR=
-TMPDIR=
-LOGDIR=${TMPDIR}/logs
+TMPDIR=${OUTDIR}/tmp
+LOGDIR=${OUTDIR}/log
 NORMAL_BAM=
 TUMOR_BAM=
 
