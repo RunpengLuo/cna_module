@@ -119,9 +119,8 @@ def plot_1d2d(
     sns.set_style("whitegrid")
     if clusters is None:
         clusters = np.ones(len(bb))
-    clusters = clusters.astype(np.int32)
-    clusters_hue = clusters + 1
-    cluster_ids = np.unique(clusters).astype(np.int32)
+    clusters_hue = clusters
+    cluster_ids = sorted(list(np.unique(clusters)))
     num_cluster = len(cluster_ids)
     if num_cluster > 8:
         palette = sns.color_palette("husl", n_colors=num_cluster)
@@ -181,8 +180,8 @@ def plot_1d2d(
         if not expected_bafs is None and not expected_rdrs is None:
             exp_bafs = expected_bafs[:, si]
             exp_rdrs = expected_rdrs[:, si - 1] if si > 0 else np.ones(len(exp_bafs))
-            for ci in cluster_ids:
-                center_text = str(ci + 1)
+            for ci, cluster_id in enumerate(cluster_ids):
+                center_text = str(cluster_id)
                 fontdict = {"fontsize": 10}
                 g0.ax_joint.text(exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
             g0.ax_joint.scatter(
@@ -252,11 +251,11 @@ def plot_1d2d(
             rdr_lines = []
             baf_lines = []
             bl_colors = [(0, 0, 0, 1)] * len(clusters)
-            for ci in cluster_ids:
+            for ci, cluster_id in enumerate(cluster_ids):
                 exp_baf = expected_bafs[int(ci), si]
                 exp_rdr = expected_rdrs[int(ci), si - 1] if si > 0 else 1.0
-                my_starts = bb_starts[clusters == ci]
-                my_ends = bb_ends[clusters == ci]
+                my_starts = bb_starts[clusters == cluster_id]
+                my_ends = bb_ends[clusters == cluster_id]
                 rdr_lines.extend(
                     [
                         [(my_starts[bi], exp_rdr), (my_ends[bi], exp_rdr)]

@@ -1,11 +1,13 @@
 import os
 import sys
+import time
 import numpy as np
 import pandas as pd
 
 from utils import *
 from phase_snps import *
 from plot_utils import plot_1d2d
+from statsmodels.stats.multitest import multipletests
 
 
 def adaptive_binning(
@@ -49,6 +51,21 @@ def adaptive_binning(
             bin_id += 1
     return snp_info
 
+def meta_snp(
+    refs: np.ndarray, 
+    alts: np.ndarray, 
+    tots: np.ndarray,
+    gts: np.ndarray
+):
+    """
+    refs, alts, tots: (nsamples, nsnps)
+    gts: (nsnps, )
+    """
+    meta_refs = refs * gts[:, None] + alts * (1 - gts[:, None])
+    meta_ref = np.sum(meta_refs, axis=0)
+    meta_alt = np.sum(tots, axis=0) - meta_ref
+    return meta_ref, meta_alt
+
 
 def compute_mhBAF(
     snp_info: pd.DataFrame,
@@ -68,6 +85,12 @@ def compute_mhBAF(
     3. EM phasing over normal sample
     """
     print("compute phased mhBAF")
+
+    mirror_baf = True
+    bin_flips = np.random.randint(2, size=nbins)
+
+    ts = time.time()
+
     cov_mat = np.zeros((nbins, nsamples), dtype=np.float64)
     baf_mat = np.zeros((nbins, nsamples), dtype=np.float64)
     alpha_mat = np.zeros((nbins, nsamples), dtype=np.int32)
@@ -82,9 +105,12 @@ def compute_mhBAF(
     snp_grp_bins = snp_info.groupby(by="bin_id", sort=False)
     bin_ids = snp_info["bin_id"].unique()
 
+    rbaf_mat = np.zeros((nbins, nsamples), dtype=np.float64)
+    raw_pvals = np.zeros((nbins, 2), dtype=np.float64)
+
     for bin_id in bin_ids:
         if bin_id % 500 == 0:
-            print(f"process {bin_id}/{nbins}")
+            print(f"process {bin_id}/{nbins} {time.time() - ts}")
         snp_bin = snp_grp_bins.get_group(bin_id)
         snp_bin_idx = snp_bin.index.to_numpy()
         nsnp_bin = len(snp_bin)
@@ -97,8 +123,8 @@ def compute_mhBAF(
         bss = snp_bss[snp_bin_idx]
 
         # meta-SNP info
-        meta_refs = []
-        meta_alts = []
+        meta_refs_arr = []
+        meta_alts_arr = []
         meta_ids = np.zeros(nsnp_bin, dtype=np.int16)
 
         prev_start = 0
@@ -111,18 +137,14 @@ def compute_mhBAF(
             if unphased[i]:
                 # clean previous meta-SNP
                 if prev_num_snps > 0:
-                    my_gts = gts[prev_start:i]
-                    meta_ref = refs[prev_start:i] * my_gts[:, None] + alts[
-                        prev_start:i
-                    ] * (1 - my_gts[:, None])
-                    meta_alt = tots[prev_start:i] - meta_ref
-                    meta_refs.append(meta_ref)
-                    meta_alts.append(meta_alt)
+                    meta_ref, meta_alt = meta_snp(refs[prev_start:i], alts[prev_start:i], tots[prev_start:i], gts[prev_start:i])
+                    meta_refs_arr.append(meta_ref)
+                    meta_alts_arr.append(meta_alt)
                     meta_ids[prev_start:i] = meta_id
                     meta_id += 1
                 # add current unphased SNP
-                meta_refs.append(refs[i])
-                meta_alts.append(alts[i])
+                meta_refs_arr.append(refs[i])
+                meta_alts_arr.append(alts[i])
                 meta_ids[i] = meta_id
                 meta_id += 1
                 prev_start = i + 1
@@ -136,13 +158,10 @@ def compute_mhBAF(
                         or prev_blocksize >= max_blocksize
                         or (prev_ps != ps)
                     ):
-                        my_gts = gts[prev_start:i]
-                        meta_ref = refs[prev_start:i] * my_gts[:, None] + alts[
-                            prev_start:i
-                        ] * (1 - my_gts[:, None])
-                        meta_alt = tots[prev_start:i] - meta_ref
-                        meta_refs.append(meta_ref)
-                        meta_alts.append(meta_alt)
+                        meta_ref, meta_alt = meta_snp(refs[prev_start:i], alts[prev_start:i], tots[prev_start:i], gts[prev_start:i])
+                        meta_refs_arr.append(meta_ref)
+                        meta_alts_arr.append(meta_alt)
+
                         meta_ids[prev_start:i] = meta_id
                         meta_id += 1
                         prev_start = i
@@ -158,31 +177,35 @@ def compute_mhBAF(
                     prev_blocksize = bs
                     prev_ps = ps
         if prev_start < nsnp_bin:  # clean final meta-SNP
-            my_gts = gts[prev_start:]
-            meta_ref = (
-                refs[prev_start:] * my_gts[:, None]
-                + alts[prev_start:]
-                + (1 - my_gts[:, None])
-            )
-            meta_alt = tots[prev_start:] - meta_ref
-            meta_refs.append(meta_ref)
-            meta_alts.append(meta_alt)
+            meta_ref, meta_alt = meta_snp(refs[prev_start:], alts[prev_start:], tots[prev_start:], gts[prev_start:])
+            meta_refs_arr.append(meta_ref)
+            meta_alts_arr.append(meta_alt)
+    
             meta_ids[prev_start:] = meta_id
             meta_id += 1
 
         # meta-snps, sample by #SNP
-        refs = np.vstack(meta_refs).astype(np.int32).T
-        alts = np.vstack(meta_alts).astype(np.int32).T
+        refs = np.vstack(meta_refs_arr).astype(np.int32).T
+        alts = np.vstack(meta_alts_arr).astype(np.int32).T
+        totals = refs + alts
 
-        # TODO don't do mhBAF here?
         runs = {
-            b: multisample_em(alts[1:], refs[1:], b, mirror=True)
-            for b in np.arange(0.05, 0.55, 0.05)
+            b: multisample_em(alts[1:], refs[1:], b, mirror=mirror_baf) 
+            for b in np.arange(0, 0.55, 0.05)
         }
-        # runs = {
-        #     b: multisample_em(alts[1:], refs[1:], b, mirror=False) for b in np.arange(0.05, 1.00, 0.05)
-        # }
         bafs, phases, ll = max(runs.values(), key=lambda x: x[-1])
+
+        rbafs, rphases, rll = random_phasing(alts[1:], refs[1:], totals[1:])
+        rbaf_mat[bin_id, 1:] = rbafs
+        raw_pvals[bin_id, 0] = binom_test_approx(refs[0][None, :], totals[0][None, :])
+        raw_pvals[bin_id, 1] = binom_test_approx(refs[1:], totals[1:])
+        
+        
+        if not mirror_baf:
+            flip_baf = bin_flips[bin_id]
+            bafs = flip_baf * (1 - bafs) + (1 - flip_baf) * bafs
+            phases = flip_baf * (1 - phases) + (1 - flip_baf) * phases
+
         snp_info.loc[snp_bin_idx, "PHASE"] = phases[meta_ids] * gts + (
             1 - phases[meta_ids]
         ) * (1 - gts)
@@ -190,22 +213,30 @@ def compute_mhBAF(
         # mean ENTROPY of phasing posterior
         snp_info.loc[snp_bin_idx, "ENTROPY"] = get_phasing_entropy(phases)[meta_ids]
 
-        totals = np.sum(refs + alts, axis=1)
+        sample_totals = np.sum(refs + alts, axis=1)
         bAlleles = refs @ phases + alts @ (1 - phases)
 
-        baf_mat[bin_id, 0] = bAlleles[0] / totals[0]
+        baf_mat[bin_id, 0] = bAlleles[0] / sample_totals[0]
         baf_mat[bin_id, 1:] = bafs
 
         phases = np.round(phases).astype(np.int8)
         betas = refs @ phases + alts @ (1 - phases)
-        alpha_mat[bin_id, :] = totals - betas
+        alpha_mat[bin_id, :] = sample_totals - betas
         beta_mat[bin_id, :] = betas
-        cov_mat[bin_id,] = totals / nsnp_bin
-    return cov_mat, baf_mat, alpha_mat, beta_mat
+        cov_mat[bin_id,] = sample_totals / nsnp_bin
+    
+    # FDR BH correction
+    # pval_mask = ~np.isnan(raw_pvals)
+    # rejected, _, _, _ = multipletests(raw_pvals[pval_mask], method="fdr_bh", alpha=0.05)
+    # pval_mask[pval_mask] = ~rejected
+    # # pval_mask == True if allelic balanced.
+    # baf_mat[pval_mask, :] = rbaf_mat[pval_mask, :]
+
+    return cov_mat, baf_mat, alpha_mat, beta_mat, raw_pvals
 
 
 def compute_RDR(
-    snp_info: pd.DataFrame, bases_mat: np.ndarray, nbins: int, ntumor_samples: int
+    bin_ids: np.ndarray, snp_info: pd.DataFrame, bases_mat: np.ndarray, nbins: int, ntumor_samples: int
 ):
     print("compute RDR")
     snp_grp_bins = snp_info.groupby(by="bin_id", sort=False)
@@ -293,7 +324,7 @@ if __name__ == "__main__":
     ##################################################
     snp_info["PHASE"] = 0.0
     snp_info["ENTROPY"] = 0.0
-    cov_mat, baf_mat, alpha_mat, beta_mat = compute_mhBAF(
+    cov_mat, baf_mat, alpha_mat, beta_mat, raw_pvals = compute_mhBAF(
         snp_info,
         ref_mat,
         alt_mat,
@@ -309,9 +340,10 @@ if __name__ == "__main__":
     np.savez_compressed(out_baf_mat, mat=baf_mat)
     np.savez_compressed(out_alpha_mat, mat=alpha_mat)
     np.savez_compressed(out_beta_mat, mat=beta_mat)
+    np.savez_compressed(os.path.join(out_dir, "bin_matrix.pval.npz"), mat=raw_pvals)
 
     ##################################################
-    rdr_mat_raw, rdr_mat_corr = compute_RDR(snp_info, bases_mat, nbins, ntumor_samples)
+    rdr_mat_raw, rdr_mat_corr = compute_RDR(bin_ids, snp_info, bases_mat, nbins, ntumor_samples)
 
     np.savez_compressed(out_rdr_raw_mat, mat=rdr_mat_raw)
     np.savez_compressed(out_rdr_corr_mat, mat=rdr_mat_corr)

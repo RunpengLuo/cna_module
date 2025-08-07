@@ -1,5 +1,6 @@
 import os
 import sys
+from collections import Counter
 import kneed
 import numpy as np
 import pandas as pd
@@ -7,24 +8,7 @@ import matplotlib.pyplot as plt
 from utils import *
 from hmm_models import *
 from plot_utils import plot_1d2d
-
-# def elbow_bic(minK: int, maxK: int, all_bics: np.ndarray, state_selection: str, outdir: str):
-#     if state_selection != "bic":
-#         return None, False
-
-#     scores = all_bics[minK : maxK + 1]
-#     Ks = [k for k in range(minK, maxK + 1)]
-#     kl = kneed.KneeLocator(x=Ks, y=scores, curve="convex", direction="decreasing")
-
-#     elbow_x, elbow_y = kl.elbow, kl.elbow_y
-#     kl.plot_knee(
-#         title=f"{state_selection} Curve",
-#         xlabel="K",
-#         ylabel=f"{state_selection}",
-#     )
-#     plt.savefig(os.path.join(outdir, f"{state_selection}-curve.png"), dpi=300)
-#     return None, False
-
+from hmm_models2 import MIXBAFHMM, mirror_baf, split_X
 
 if __name__ == "__main__":
     ##################################################
@@ -36,9 +20,19 @@ if __name__ == "__main__":
     minK = 2
     maxK = 8
     restarts = 10
-    model_type = ""
+
+    # model_type = "unmirrored"
+    model_type = "mirrored"
+    # model_type = "gaussianHMM"
+    print(f"model={model_type}")
 
     os.makedirs(out_dir, exist_ok=True)
+    plot_dir = os.path.join(out_dir, "plots")
+    bbc_dir = os.path.join(out_dir, "labels")
+    os.makedirs(plot_dir, exist_ok=True)
+    os.makedirs(bbc_dir, exist_ok=True)
+
+    bb_file = os.path.join(bb_dir, "bulk.bb")
     bin_pfile = os.path.join(bb_dir, "bin_position.tsv.gz")
     baf_mfile = os.path.join(bb_dir, "bin_matrix.baf.npz")
     rdr_mfile = os.path.join(bb_dir, "bin_matrix.rdr_corr.npz")
@@ -62,6 +56,8 @@ if __name__ == "__main__":
     X_bafs = bafs[:, 1:]  # ignore normal
     X_rdrs = rdrs[:, :]
     X = np.concatenate([X_bafs, X_rdrs], axis=1)
+    mhbafs = split_X(mirror_baf(X, nsamples), nsamples)[0]
+
     _nsegments = np.sum(X_lengths)
     assert _nsegments == nsegments, f"unmatched {_nsegments} and {nsegments}"
     print(f"#segments={nsegments}")
@@ -70,73 +66,105 @@ if __name__ == "__main__":
     all_labels = np.zeros((maxK + 1, nsegments), dtype=np.int32)
     all_bics = np.full(maxK + 1, fill_value=np.inf)
     all_lls = np.full((maxK + 1, restarts), fill_value=-np.inf)
+
     all_models = []
-    expected_rdrs = []  # each has K values
-    expected_bafs = []
+    uniq_labels = {}
+    expected_rdrs = {}  # each has K values
+    expected_bafs = {}
+    centroid_bafs = {}
 
     for K in range(minK, maxK + 1):
         print(f"running HMM on K={K}")
         my_best_ll = -1 * np.inf
         my_best_labels = None
         my_best_model = None
-        ll_histories = []
+        my_best_means = None
         for s in range(restarts):
             A = make_transmat(1 - tau, K)
             assert np.all(A > 0), "unstable tau"
-
-            # model = DiagGMMHMM(
-            #     nsamples=nsamples,
-            #     n_components=K,
-            #     n_mix=2,
-            #     init_params="mcw",
-            #     params="smctw",
-            #     covariance_type="diag",
-            #     random_state=s,
-            # )
-            model = DiagGHMM(
-                n_components=K,
-                init_params="mc",
-                params="smct",
-                covariance_type="diag",
-                random_state=s,
-            )
-
-            # init model
+            if model_type == "mirrored":
+                model = DiagGHMM(
+                    n_components=K,
+                    init_params="mc",
+                    params="smct",
+                    covariance_type="diag",
+                    # covariance_type="full",
+                    random_state=s,
+                )
+            elif model_type == "unmirrored":
+                model = MIXBAFHMM(
+                        bafdim=nsamples,
+                        n_components=K,
+                        init_params="mc",
+                        params="smct",
+                        random_state=s
+                )
+            elif model_type == "gaussianHMM":
+                model = GaussianHMM(
+                    n_components=K,
+                    init_params="mc",
+                    params="smct",
+                    covariance_type="diag",
+                    random_state=s
+                )
+            else:
+                raise NotImplementedError(f"{model_type}")
             model.startprob_ = np.ones(K) / K  # s
-            # model.weights_ = np.ones((K, 2)) * 0.5  # uniform mixture weights
-            model.transmat_ = A # t
+            # model.transmat_ = A # t
 
-            # Baum-welch learning
+            transmat = np.full((K, K), 1e-4)
+            np.fill_diagonal(transmat, 1 - (K - 1) * 1e-4)
+            model.transmat_ = transmat
+
             model.fit(X, X_lengths)
-
-            ll_histories.append(list(model.monitor_.history))
             if not model.monitor_.converged:
                 print(f"warning, model is not coverged K={K}, restart={s}")
 
             # Viterbi decoding
             prob, labels = model.decode(X, X_lengths, algorithm="map")
+            # print(prob)
             all_lls[K, s] = prob
             if prob > my_best_ll:
                 my_best_labels = labels
                 my_best_ll = prob
                 my_best_model = model
+                my_best_means = model.means_
 
-        all_labels[K, :] = my_best_labels.astype(np.int32)
+        # remap labels
+        j = 1
+        k2label = {}
+        label2k = {}
+        for i, _ in Counter(my_best_labels).most_common():
+            k2label[i] = j
+            label2k[j] = i
+            j += 1
+        labels = list(k2label.values())
+        uniq_labels[K] = labels
+        all_labels[K, :] = np.array([k2label[v] for v in my_best_labels])
         all_models.append(my_best_model)
         all_bics[K] = my_best_model.bic(X)
 
-        # if mhBAF is not imposed during binning, we can do it here TODO
-        # compute expected RDR and BAF for each K
-        expected_rdr = np.zeros((K, nsamples), dtype=np.float64)
-        expected_baf = np.zeros((K, nsamples + 1), dtype=np.float64)
-        for k in range(K):
-            expected_rdr[k, :] = np.mean(rdrs[all_labels[K, :] == k, :], axis=0)
-            expected_baf[k, :] = np.mean(bafs[all_labels[K, :] == k, :], axis=0)
+        print(my_best_means)
 
-        expected_rdrs.append(expected_rdr)
-        expected_bafs.append(expected_baf)
+        # compute expected RDR and BAF for each K
+        expected_rdr = np.zeros((len(labels), nsamples), dtype=np.float64)
+        expected_baf = np.zeros((len(labels), nsamples + 1), dtype=np.float64)
+        centroid_baf = np.zeros((len(labels), nsamples + 1), dtype=np.float64)
+        for k in range(len(labels)):
+            label = labels[k]
+            expected_rdr[k, :] = np.mean(rdrs[all_labels[K, :] == label, :], axis=0)
+            # enforce mhBAF constraints here
+            my_mhbafs = mhbafs[all_labels[K, :] == label, :]
+            expected_baf[k, 1:] = np.mean(my_mhbafs, axis=0)
+            # print(label2k[label], label2k)
+            centroid_baf[k, 1:] = my_best_means[label2k[label], :nsamples]
+
+        expected_rdrs[K] = expected_rdr
+        expected_bafs[K] = expected_baf
+        centroid_bafs[K] = centroid_baf
+    
         plot_1d2d(
-            bb_dir, out_dir, f"K{K}_", True, all_labels[K], expected_rdr, expected_baf
+            bb_dir, plot_dir, f"K{K}_", False, all_labels[K], expected_rdr, expected_baf
         )
 
     opt_K = np.argmin(all_bics)
@@ -146,6 +174,37 @@ if __name__ == "__main__":
     print("Optimal BIC:", all_bics[opt_K])
     print("BICs:", all_bics[minK : maxK + 1])
 
+    bb = pd.read_csv(bb_file, sep="\t")
+    samples = bb["SAMPLE"].unique()
+    bb["CLUSTER"] = 0
+    # save to bulk.bbc
+    for K in range(minK, maxK + 1):
+        if opt_K == K:
+            bbc_file = os.path.join(out_dir, f"bulk.bbc")
+            seg_file = os.path.join(out_dir, f"bulk.seg")
+        else:
+            bbc_file = os.path.join(bbc_dir, f"bulk{K}.bbc")
+            seg_file = os.path.join(bbc_dir, f"bulk{K}.seg")        
+        bb["CLUSTER"] = np.repeat(all_labels[K], nsamples)
+        labels = uniq_labels[K]
+        seg_rows = []
+        bb_grps = bb.groupby(by="CLUSTER", sort=False)
+        bb_bafs = expected_bafs[K][:, 1:]
+        bb_rdrs = expected_rdrs[K]
+        for l, label in enumerate(labels):
+            bb_grp = bb_grps.get_group(label)
+            for s, sample in enumerate(samples):
+                bb_sample = bb_grp.loc[bb_grp["SAMPLE"] == sample, :]
+                seg_rows.append([label, sample, len(bb_sample), bb_rdrs[l, s], 
+                                 bb_sample["#SNPS"].sum(), bb_sample["COV"].mean(), 
+                                 bb_sample["ALPHA"].sum(), bb_sample["BETA"].sum(),
+                                 bb_bafs[l, s]])
+        seg = pd.DataFrame(
+            data=seg_rows,
+            columns=["#ID", "SAMPLE", "#BINS", "RD", "#SNPS", "COV", "ALPHA", "BETA", "BAF"]
+        )
+        bb.to_csv(bbc_file, sep="\t", header=True, index=False)
+        seg.to_csv(seg_file, sep="\t", header=True, index=False)
     # we can compute cluster variance here,
 
     # elbow_bic(minK, maxK, all_bics, "bic", out_dir)
