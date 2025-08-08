@@ -152,51 +152,71 @@ def plot_1d2d(
             rdrs = rdr_mat[:, si - 1]
 
         ########################################
-        if not clusters is None:
-            g0 = sns.JointGrid(
-                x=bafs,
-                y=rdrs,
-                hue=clusters_hue,
-                palette=palette,
+        if si == 0: # normal sample
+            fig, ax = plt.subplots(1, 1)
+            g0 = sns.histplot(x=bafs, ax=ax, bins=50, binrange=[0, 1])
+            ax.vlines(
+                0.5,
+                ymin=0,
+                ymax=1,
+                transform=ax.get_xaxis_transform(),
+                linewidth=0.5,
+                colors="k",
             )
+            mu_baf = np.mean(bafs)
+            std_baf = np.std(bafs)
+            med_baf = np.median(bafs)
+            ax.set_title(f"{sample} mu={mu_baf:.3f} std={std_baf:.3f} med={med_baf:.3f}")
+            ax.set_xlabel(xlabel="mhBAF")
+            colors_ = None
+            plt.tight_layout()
+            plt.savefig(out2d, dpi=300, format="png")
+            plt.close(fig)
         else:
-            g0 = sns.JointGrid(
-                x=bafs,
-                y=rdrs,
-            )
+            if not clusters is None:
+                g0 = sns.JointGrid(
+                    x=bafs,
+                    y=rdrs,
+                    hue=clusters_hue,
+                    palette=palette,
+                )
+            else:
+                g0 = sns.JointGrid(
+                    x=bafs,
+                    y=rdrs,
+                )
 
-        g0.refline(x=0.50)
-        g0.plot_joint(sns.scatterplot, s=markersize, legend=False, edgecolors="none")
-        if si > 0:
+            g0.refline(x=0.50)
+            g0.plot_joint(sns.scatterplot, s=markersize, legend=False, edgecolors="none")
             g0.plot_marginals(
                 sns.histplot,
                 kde=True,
                 common_norm=False,
                 stat="density",
             )
-        scatter = g0.ax_joint.collections[0]
-        colors_ = scatter.get_facecolors()
+            scatter = g0.ax_joint.collections[0]
+            colors_ = scatter.get_facecolors()
 
-        if not expected_bafs is None and not expected_rdrs is None:
-            exp_bafs = expected_bafs[:, si]
-            exp_rdrs = expected_rdrs[:, si - 1] if si > 0 else np.ones(len(exp_bafs))
-            for ci, cluster_id in enumerate(cluster_ids):
-                center_text = str(cluster_id)
-                fontdict = {"fontsize": 10}
-                g0.ax_joint.text(exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
-            g0.ax_joint.scatter(
-                x=exp_bafs,
-                y=exp_rdrs,
-                facecolors="none",
-                edgecolors="black",
-                s=markersize_centroid,
-                linewidth=marker_bd_width,
-            )
-        g0.set_axis_labels(xlabel="mhBAF", ylabel="RDR")
-        g0.figure.suptitle(sample)
-        plt.tight_layout()
-        g0.savefig(out2d, dpi=300, format="png")
-        plt.close(g0.figure)
+            if not expected_bafs is None and not expected_rdrs is None:
+                exp_bafs = expected_bafs[:, si]
+                exp_rdrs = expected_rdrs[:, si - 1] if si > 0 else np.ones(len(exp_bafs))
+                for ci, cluster_id in enumerate(cluster_ids):
+                    center_text = str(cluster_id)
+                    fontdict = {"fontsize": 10}
+                    g0.ax_joint.text(exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
+                g0.ax_joint.scatter(
+                    x=exp_bafs,
+                    y=exp_rdrs,
+                    facecolors="none",
+                    edgecolors="black",
+                    s=markersize_centroid,
+                    linewidth=marker_bd_width,
+                )
+            g0.set_axis_labels(xlabel="mhBAF", ylabel="RDR")
+            g0.figure.suptitle(sample)
+            plt.tight_layout()
+            g0.savefig(out2d, dpi=300, format="png")
+            plt.close(g0.figure)
 
         ########################################
         fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(20, 4))
