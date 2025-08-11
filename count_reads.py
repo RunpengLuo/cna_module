@@ -44,6 +44,10 @@ def filter_snps(pivot_snps: pd.DataFrame, regions: pd.DataFrame):
 
     print("exclude SNPs not in all SAMPLE")
     pivot_snps = pivot_snps.dropna(how="any")
+
+    print("exclude SNPs have 0 count in any of the SAMPLE")
+    pivot_snps = pivot_snps[(pivot_snps != 0).all(axis=1)]
+    
     nsnps = len(pivot_snps)
     print(f"#SNP={nsnps}/{nsnps_raw}")
     return pivot_snps
