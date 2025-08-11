@@ -6,11 +6,12 @@ import pyranges as pr
 
 import numpy as np
 import pandas as pd
+from scipy.stats import beta
 
 from utils import *
 
 
-def filter_snps(pivot_snps: pd.DataFrame, regions: pd.DataFrame):
+def validate_snps(pivot_snps: pd.DataFrame, regions: pd.DataFrame):
     """
     filter any SNP doesn't belong to valid regions
     filter any SNP doesn't appear in all SAMPLE
@@ -19,7 +20,6 @@ def filter_snps(pivot_snps: pd.DataFrame, regions: pd.DataFrame):
     all_positions = pivot_snps.index.to_frame(index=False)
     all_positions["POS0"] = all_positions["POS"] - 1
     all_positions["End"] = all_positions["POS0"] + 1
-    nsnps_raw = len(all_positions)
 
     pr_snps = pr.PyRanges(
         all_positions.rename(columns={"#CHR": "Chromosome", "POS0": "Start"})
@@ -41,24 +41,38 @@ def filter_snps(pivot_snps: pd.DataFrame, regions: pd.DataFrame):
         .to_numpy()
     )
     pivot_snps = pivot_snps.loc[~mask, :]
-
-    print("exclude SNPs not in all SAMPLE")
     pivot_snps = pivot_snps.dropna(how="any")
-
-    print("exclude SNPs have 0 count in any of the SAMPLE")
-    pivot_snps = pivot_snps[(pivot_snps != 0).all(axis=1)]
-    
-    nsnps = len(pivot_snps)
-    print(f"#SNP={nsnps}/{nsnps_raw}")
+    print(f"#SNP after validation={len(pivot_snps)}")
     return pivot_snps
 
+def filter_snps(snp_positions: pd.DataFrame, ref_mat: np.ndarray, alt_mat: np.ndarray, gamma: float):
+    """
+    exclude SNPs have 0 count in any of the SAMPLE
+    exclude SNPs if normal sample failed beta-posterior credible interval test.
+    """
+    print("filter SNPs")
+    snp_wl = np.ones(len(snp_positions), dtype=bool)
+    snp_wl = snp_wl & np.all((ref_mat + alt_mat) > 0, axis=1)
 
-def assign_snp_bounderies(pivot_snps: pd.DataFrame, regions: pd.DataFrame):
+    def isHet(countA, countB, gamma):
+        p_lower = gamma / 2.0
+        p_upper = 1.0 - p_lower
+        [c_lower, c_upper] = beta.ppf([p_lower, p_upper], countA + 1, countB + 1)
+        return c_lower <= 0.5 <= c_upper
+    snp_wl = snp_wl & np.vectorize(isHet)(ref_mat[:, 0], alt_mat[:, 0], gamma)
+
+    snp_positions = snp_positions.loc[snp_wl, :]
+    ref_mat = ref_mat[snp_wl, :]
+    alt_mat = alt_mat[snp_wl, :]
+    print(f"#SNP after filtering={len(snp_positions)}")
+    return snp_positions, ref_mat, alt_mat
+
+def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
     """
     divide regions into subregions, each subregion has one SNP
     """
     print("assign SNP bounderies")
-    snp_info: pd.DataFrame = pivot_snps.index.to_frame(index=False)
+    snp_info: pd.DataFrame = snp_positions.copy(deep=True)
     snp_info["POS0"] = snp_info["POS"] - 1
     snp_info["START"] = 0
     snp_info["END"] = 0
@@ -173,7 +187,8 @@ if __name__ == "__main__":
     pivot_snps = all_snps.pivot(
         index=["#CHR", "POS"], columns="SAMPLE", values=["REF", "ALT"]
     )
-    pivot_snps = filter_snps(pivot_snps, regions)
+    print(f"#SNPs (raw)={len(pivot_snps.index)}")
+    pivot_snps = validate_snps(pivot_snps, regions)
 
     ##################################################
     # preserve sample order
@@ -184,13 +199,18 @@ if __name__ == "__main__":
     pd.DataFrame({"SAMPLE": samples}).to_csv(
         out_sid_file, sep="\t", header=True, index=False
     )
+    snp_positions: pd.DataFrame = pivot_snps.index.to_frame(index=False)
     ref_mat = pivot_snps["REF"].to_numpy()[:, pivot_orders]
     alt_mat = pivot_snps["ALT"].to_numpy()[:, pivot_orders]
+
+    snp_positions, ref_mat, alt_mat = filter_snps(snp_positions, ref_mat, alt_mat, gamma=0.05) # TODO
+    assert len(snp_positions) > 0, "no valid HET SNPs after filtering"
+
     np.savez_compressed(out_ref_mat, mat=ref_mat)
     np.savez_compressed(out_alt_mat, mat=alt_mat)
 
     ##################################################
-    snp_info = assign_snp_bounderies(pivot_snps, regions)
+    snp_info = assign_snp_bounderies(snp_positions, regions)
     snp_info.to_csv(
         out_snp_file,
         sep="\t",
