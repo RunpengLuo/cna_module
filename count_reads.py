@@ -77,6 +77,9 @@ def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
     snp_info["START"] = 0
     snp_info["END"] = 0
 
+    snp_info["region_id"] = 0
+    region_id = 0
+
     chroms = snp_info["#CHR"].unique().tolist()
     region_grps_ch = regions.groupby(by="#CHR", sort=False)
     for chrom in chroms:
@@ -88,6 +91,12 @@ def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
                 continue
             reg_snp_positions = reg_snps["POS0"].to_numpy()
             reg_snp_indices = reg_snps.index.to_numpy()
+
+            # annotate region ID            
+            snp_info.loc[reg_snp_indices, "region_id"] = region_id
+            region_id += 1
+
+            # build SNP bounderies
             if len(reg_snps) == 1:
                 snp_info.loc[reg_snp_indices, "START"] = reg_start
                 snp_info.loc[reg_snp_indices, "END"] = reg_end
@@ -216,7 +225,7 @@ if __name__ == "__main__":
         sep="\t",
         header=True,
         index=False,
-        columns=["#CHR", "START", "END", "POS"],
+        columns=["#CHR", "START", "END", "POS", "region_id"],
     )
     snp_info.to_csv(
         out_bed_file,
