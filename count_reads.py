@@ -54,12 +54,12 @@ def filter_snps(snp_positions: pd.DataFrame, ref_mat: np.ndarray, alt_mat: np.nd
     snp_wl = np.ones(len(snp_positions), dtype=bool)
     snp_wl = snp_wl & np.all((ref_mat + alt_mat) > 0, axis=1)
 
-    def isHet(countA, countB, gamma):
-        p_lower = gamma / 2.0
-        p_upper = 1.0 - p_lower
-        [c_lower, c_upper] = beta.ppf([p_lower, p_upper], countA + 1, countB + 1)
-        return c_lower <= 0.5 <= c_upper
-    snp_wl = snp_wl & np.vectorize(isHet)(ref_mat[:, 0], alt_mat[:, 0], gamma)
+    p_lower = gamma / 2.0
+    p_upper = 1.0 - p_lower
+    q = np.array([p_lower, p_upper])
+    het_cred_ints = beta.ppf(q[None, :], ref_mat[:, 0][:, None], alt_mat[:, 0][:, None])
+    het_incl_balanced = (het_cred_ints[:, 0] <= 0.5) & (0.5 <= het_cred_ints[:, 1])
+    snp_wl = snp_wl & het_incl_balanced
 
     snp_positions = snp_positions.loc[snp_wl, :]
     ref_mat = ref_mat[snp_wl, :]
