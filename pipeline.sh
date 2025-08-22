@@ -17,6 +17,14 @@ d=300
 mincov=5
 CHROMS=$(seq 1 22)
 
+# SNP filtering parameters
+gamma=0.05
+min_ad=1
+
+# phasing parameters
+minMAPQ=20
+numThreads=8
+
 # binning parameters
 MSR=7500
 MTR=30
@@ -40,7 +48,7 @@ mkdir -p ${LOGDIR}
 echo ${SAMPLE}
 echo ${OUTDIR}
 ########################################
-echo "start genotyping on normal sample"
+echo "genotyping on normal sample"
 date
 snp_dir="${OUTDIR}/snps"
 mkdir -p ${snp_dir}
@@ -86,7 +94,7 @@ else
     echo "skip"
 fi
 
-echo "allele counting on ${SAMPLE}"
+echo "allele counting on tumor sample=${SAMPLE}"
 date
 tumor_1bed=${baf_dir}/tumor.1bed
 if [[ ! -f ${tumor_1bed} ]]; then
@@ -124,91 +132,128 @@ else
 fi
 
 ########################################
-echo "start phasing"
+echo "form allele-count matrix"
+date
+allele_dir="${OUTDIR}/allele"
+mkdir -p ${allele_dir}
+snp_info_file="${allele_dir}/snp_info.tsv.gz"
+if [[ ! -f ${snp_info_file} ]]; then
+    python -u ${SCRIPT_DIR}/form_snp_matrix.py \
+        ${REGION_BED} \
+        ${baf_dir} \
+        ${allele_dir} \
+        "${min_ad}" \
+        "${gamma}"
+else
+    echo "skip"
+fi
+
+########################################
+echo "filtering&concat Het SNPs"
+date
+het_snp_file="${allele_dir}/snps.vcf.gz"
+if [[ ! -f ${het_snp_file} ]]; then
+    snp_list_file=${TMPDIR}/snps.list
+    >${snp_list_file}
+
+    for CHR in $CHROMS; do
+        CHROM=chr${CHR}
+        echo "${snp_dir}/${CHROM}.vcf.gz" >> ${snp_list_file}
+    done
+    raw_concat_file=${TMPDIR}/het_snps.raw.vcf.gz
+    bcftools concat --output-type z \
+        --file-list ${snp_list_file} \
+        --output ${raw_concat_file}
+
+    bcftools view -T "${allele_dir}/snps.1pos" \
+        -Oz -o ${het_snp_file} ${raw_concat_file}
+else
+    echo "skip"
+fi
+        
+#######################################
+echo "run longphase & HapCUT2"
 date
 phase_dir="${OUTDIR}/phase"
 mkdir -p ${phase_dir}
 phase_file=${phase_dir}/phased.vcf.gz
 if [[ ! -f ${phase_file} ]]; then
-    for CHR in $CHROMS; do
-        CHROM=chr${CHR}
-        ch_phase_file=${TMPDIR}/${CHROM}.phased.vcf.gz
-        if [[ -f ${ch_phase_file} ]]; then
-            echo "${CHROM} exists"
-            continue
-        fi
-        hiphase \
-            --bam ${NORMAL_BAM} \
-            --reference ${REFERENCE} \
-            --vcf "${snp_dir}/${CHROM}.vcf.gz" \
-            --output-vcf ${ch_phase_file} \
-            --threads 2 \
-            --ignore-read-groups \
-            --csi-index &>"${LOGDIR}/hiphase.${CHROM}.log" &
-        
-        while [[ $(jobs -r -p | wc -l) -ge $MAXJOBS ]]; do
-            sleep 10
-        done
-    done
-    wait
-
-    echo "concat phasing files"
+    longphase_linux-x64 phase \
+        --bam-file=${NORMAL_BAM} \
+        --reference=${REFERENCE} \
+        --snp-file=${het_snp_file} \
+        --mappingQuality=${minMAPQ} \
+        --out-prefix="${phase_dir}/phased" \
+        --pb --threads=${numThreads} &>"${LOGDIR}/longphase.log"
+    echo "longphase is finished"
     date
 
-    phase_list_file=${TMPDIR}/phase.list
-    >${phase_list_file}
+    extractHAIRS --bam ${NORMAL_BAM} \
+                --VCF ${phase_dir}/phased.vcf \
+                --ref ${REFERENCE} \
+                --fullprint 1 \
+                --realign_variants 0 \
+                --out ${TMPDIR}/Normal.fragments.full.txt &>"${LOGDIR}/hairs.log"
+    echo "HapCUT2 extractHAIRS is finished"
+    date
 
-    for CHR in $CHROMS; do
-        CHROM=chr${CHR}
-        echo "${TMPDIR}/${CHROM}.phased.vcf.gz" >> ${phase_list_file}
-    done
-
-    bcftools concat --file-list ${phase_list_file} -Ou | bcftools sort -Oz -o ${phase_file}
-    bcftools index -f ${phase_file}
+    bgzip "${phase_dir}/phased.vcf"
+    python ${SCRIPT_DIR}/hairs.py \
+            ${TMPDIR}/Normal.fragments.full.txt \
+            ${phase_file} \
+            ${phase_dir}/Normal.hairs.tsv.gz
 else
     echo "skip"
 fi
 
-########################################
-echo "run count_reads python script"
-date
-rdr_dir="${OUTDIR}/rdr"
-mkdir -p ${rdr_dir}
-test_file=${rdr_dir}/sample_ids.tsv
-if [[ ! -f ${test_file} ]]; then
-    python -u ${SCRIPT_DIR}/count_reads.py \
-        ${SAMPLE} \
-        ${REGION_BED} \
-        ${baf_dir} \
-        ${rdr_dir} \
-        ${NORMAL_BAM} \
-        ${TUMOR_BAM}
-else
-    echo "skip"
-fi
+#######################################
+# echo "compute aligned bases per SNP block"
+# date
+# dp_mat_file="${allele_dir}/snp_matrix.dp.npz"
+# if [[ ! -f ${dp_mat_file} ]]; then
+
+# fi
 
 ########################################
-echo "run combine_counts python script"
-date
-bb_dir="${OUTDIR}/bb"
-mkdir -p ${bb_dir}
-test_file=${bb_dir}/sample_ids.tsv
-if [[ ! -f ${test_file} ]]; then
-    python -u ${SCRIPT_DIR}/combine_counts.py \
-        ${phase_file} \
-        ${rdr_dir} \
-        ${bb_dir} \
-        ${MSR} ${MTR} ${READ_LENGTH} ${MSPB} ${MBS}
-else
-    echo "skip"
-fi
+# echo "run count_reads python script"
+# date
+# rdr_dir="${OUTDIR}/rdr"
+# mkdir -p ${rdr_dir}
+# test_file=${rdr_dir}/sample_ids.tsv
+# if [[ ! -f ${test_file} ]]; then
+#     python -u ${SCRIPT_DIR}/count_reads.py \
+#         ${SAMPLE} \
+#         ${REGION_BED} \
+#         ${baf_dir} \
+#         ${rdr_dir} \
+#         ${NORMAL_BAM} \
+#         ${TUMOR_BAM}
+# else
+#     echo "skip"
+# fi
 
 ########################################
-echo "run cluster_bins python script TODO"
-date
-bbc_dir="${OUTDIR}/bbc"
-# TODO
+# echo "run combine_counts python script"
+# date
+# bb_dir="${OUTDIR}/bb"
+# mkdir -p ${bb_dir}
+# test_file=${bb_dir}/sample_ids.tsv
+# if [[ ! -f ${test_file} ]]; then
+#     python -u ${SCRIPT_DIR}/combine_counts.py \
+#         ${phase_file} \
+#         ${rdr_dir} \
+#         ${bb_dir} \
+#         ${MSR} ${MTR} ${READ_LENGTH} ${MSPB} ${MBS}
+# else
+#     echo "skip"
+# fi
 
-rm -rf ${TMPDIR}
-echo "Done"
-date
+########################################
+# echo "run cluster_bins python script TODO"
+# date
+# bbc_dir="${OUTDIR}/bbc"
+# # TODO
+
+# rm -rf ${TMPDIR}
+# echo "Done"
+# date
