@@ -9,13 +9,12 @@ import pandas as pd
 """
 hair: one read per row, list of phasing supported
 n=#SNPs
-hair array: shape (n - 1, 4)
+hair array: shape (n, 4)
 """
 
 def read_hair(hair_file: str, nsnps: int):
     hairs = np.zeros((nsnps, 4), dtype=np.int16)
     mapper = {"00": 0, "01": 1, "10": 2, "11": 3}
-    mapper_rev = {"00": 3, "01": 2, "10": 1, "11": 0}
     ctr = 0
     with open(hair_file, "r") as hair_fd:
         for line in hair_fd:
@@ -30,13 +29,11 @@ def read_hair(hair_file: str, nsnps: int):
                 var_end = var_start + len(phases) - 1
 
                 pvar_idx = [mapper[phases[j:j+2]] for j in range(len(phases) - 1)]
-                pvar_idx_rev = [mapper_rev[phases[j:j+2]] for j in range(len(phases) - 1)]
                 # print(line)
                 # print(pvar_idx)
                 # print(np.arange(var_start, var_end))
                 # print(var_start, var_end, phases)
                 hairs[np.arange(var_start, var_end), pvar_idx] += 1
-                hairs[np.arange(var_start, var_end), pvar_idx_rev] += 1
     print(f"total processed {ctr} reads")
     return hairs
 
