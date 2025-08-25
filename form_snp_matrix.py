@@ -112,6 +112,43 @@ def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
     snp_info["Blocksize"] = snp_info["END"] - snp_info["START"]
     return snp_info
 
+def run_mosdepth(
+    samples: list,
+    bams: list,
+    threads: int,
+    readquality: int,
+    snp_bed_file: str,
+    mosdepth_odir: str,
+):
+    print("run mosdepth to compute per region depth")
+    mos_files = []
+    for sample, bam in zip(samples, bams):
+        mos_file = f"{mosdepth_odir}/{sample}.regions.bed.gz"
+        if not os.path.exists(mos_file):
+            print(f"run mosdepth on {sample}")
+            msdp_cmd = [
+                mosdepth,
+                "--no-per-base",
+                "--fast-mode",
+                "-t",
+                str(threads),
+                "-Q",
+                str(readquality),
+                "--by",
+                snp_bed_file,
+                f"{mosdepth_odir}/{sample}",
+                bam,
+            ]
+            err_fd = open(f"{mosdepth_odir}/{sample}.err.log", "w")
+            out_fd = open(f"{mosdepth_odir}/{sample}.out.log", "w")
+            ret = subprocess.run(msdp_cmd, stdout=out_fd, stderr=err_fd)
+            err_fd.close()
+            out_fd.close()
+            ret.check_returncode()
+        assert os.path.exists(mos_file)
+        mos_files.append(mos_file)
+    return mos_files
+
 """
 1. Filter Het SNPs based on certain criteria.
 2. Form REF/ALT matrices, (snp, sample), and sample orders
@@ -123,11 +160,18 @@ if __name__ == "__main__":
     _, region_file, baf_dir, out_dir = args[:4]
     min_ad = int(args[4])
     gamma = float(args[5])
+    bams = args[6:]
+    assert len(bams) == 2
+
+    mosdepth = "mosdepth"
+    threads = 8
+    readquality = 11
 
     nbaf_file = os.path.join(baf_dir, "normal.1bed")
     tbaf_file = os.path.join(baf_dir, "tumor.1bed")
 
     os.makedirs(out_dir, exist_ok=True)
+    out_dp_file = os.path.join(out_dir, "snp_matrix.dp.npz")
     out_ref_mat = os.path.join(out_dir, "snp_matrix.ref.npz")
     out_alt_mat = os.path.join(out_dir, "snp_matrix.alt.npz")
     out_sid_file = os.path.join(out_dir, "sample_ids.tsv")
@@ -151,7 +195,7 @@ if __name__ == "__main__":
     tumor_snps = read_baf_file(tbaf_file)
     samples = normal_snps["SAMPLE"].unique().tolist() + tumor_snps["SAMPLE"].unique().tolist()
     print("samples=", samples)
-    assert len(set(samples)) >= 2
+    assert len(set(samples)) == 2
 
     all_snps = pd.concat([normal_snps, tumor_snps], axis=0).reset_index(drop=True)
     all_snps["#CHR"] = pd.Categorical(
@@ -208,3 +252,25 @@ if __name__ == "__main__":
         header=False,
         index=False,
     )
+
+    ##################################################
+    mosdepth_odir = os.path.join(out_dir, f"out_mosdepth")
+    os.makedirs(mosdepth_odir, exist_ok=True)
+    mos_files = run_mosdepth(
+        samples, bams, threads, readquality, out_bed_file, mosdepth_odir
+    )
+
+    snp_info["_order"] = range(len(snp_info))
+    for sample, mos_file in zip(samples, mos_files):
+        mos_df = pd.read_table(
+            mos_file, sep="\t", header=None, names=["#CHR", "START", "END", "COV"]
+        )
+        snp_info = pd.merge(
+            left=snp_info, right=mos_df, how="left", on=["#CHR", "START", "END"]
+        )
+        snp_info = snp_info.sort_values("_order")
+        snp_info = snp_info.rename(columns={"COV": sample})
+
+    dp_mat = snp_info.loc[:, samples].to_numpy()
+    np.savez_compressed(out_dp_file, mat=dp_mat)
+    sys.exit(0)
