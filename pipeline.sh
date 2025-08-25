@@ -10,6 +10,11 @@ LOGDIR=${OUTDIR}/log
 NORMAL_BAM=
 TUMOR_BAM=
 
+
+SAMPLE_FILE=
+
+# read in a sample_file TSV rather than paths here, first row is normal
+
 # preprocessing parameters
 q=0
 Q=11
@@ -35,7 +40,7 @@ MBS=1000000 #1e6
 # general parameters
 MAXJOBS=4
 
-REGION_BED=/diskmnt/Users2/runpengl/data/chm12v2.0_region.bed
+REGION_BED=/diskmnt/Users2/runpengl/data/chm13v2.0_region.bed
 DB_SNP=/diskmnt/Projects/ccRCC_longread/runpengl/vcf/chm13v2.0_dbSNPv155.vcf.gz
 REFERENCE=/diskmnt/Projects/ccRCC_longread/runpengl/reference/T2T-CHM13v2.0.fasta
 
@@ -143,13 +148,14 @@ if [[ ! -f ${snp_info_file} ]]; then
         ${baf_dir} \
         ${allele_dir} \
         "${min_ad}" \
-        "${gamma}"
+        "${gamma}" \
+        ${NORMAL_BAM} ${TUMOR_BAM} &>"${LOGDIR}/form_snp_matrix.log"
 else
     echo "skip"
 fi
 
 ########################################
-echo "filtering&concat Het SNPs"
+echo "filter&concat Het SNPs"
 date
 het_snp_file="${allele_dir}/snps.vcf.gz"
 if [[ ! -f ${het_snp_file} ]]; then
@@ -193,44 +199,32 @@ if [[ ! -f ${phase_file} ]]; then
                 --ref ${REFERENCE} \
                 --fullprint 1 \
                 --realign_variants 0 \
-                --out ${TMPDIR}/Normal.fragments.full.txt &>"${LOGDIR}/hairs.log"
-    echo "HapCUT2 extractHAIRS is finished"
+                --out ${TMPDIR}/Normal.fragments.full.txt &>"${LOGDIR}/hairs.normal.log"
+    echo "HapCUT2 extractHAIRS on normal sample is finished"
     date
 
+    extractHAIRS --bam ${TUMOR_BAM} \
+                --VCF ${phase_dir}/phased.vcf \
+                --ref ${REFERENCE} \
+                --fullprint 1 \
+                --realign_variants 0 \
+                --out ${TMPDIR}/Tumor.fragments.full.txt &>"${LOGDIR}/hairs.tumor.log"
+    echo "HapCUT2 extractHAIRS on ${SAMPLE} sample is finished"
+    date
+    
     bgzip "${phase_dir}/phased.vcf"
     python ${SCRIPT_DIR}/hairs.py \
             ${TMPDIR}/Normal.fragments.full.txt \
             ${phase_file} \
             ${phase_dir}/Normal.hairs.tsv.gz
+
+    python ${SCRIPT_DIR}/hairs.py \
+            ${TMPDIR}/Tumor.fragments.full.txt \
+            ${phase_file} \
+            ${phase_dir}/Tumor.hairs.tsv.gz
 else
     echo "skip"
 fi
-
-#######################################
-# echo "compute aligned bases per SNP block"
-# date
-# dp_mat_file="${allele_dir}/snp_matrix.dp.npz"
-# if [[ ! -f ${dp_mat_file} ]]; then
-
-# fi
-
-########################################
-# echo "run count_reads python script"
-# date
-# rdr_dir="${OUTDIR}/rdr"
-# mkdir -p ${rdr_dir}
-# test_file=${rdr_dir}/sample_ids.tsv
-# if [[ ! -f ${test_file} ]]; then
-#     python -u ${SCRIPT_DIR}/count_reads.py \
-#         ${SAMPLE} \
-#         ${REGION_BED} \
-#         ${baf_dir} \
-#         ${rdr_dir} \
-#         ${NORMAL_BAM} \
-#         ${TUMOR_BAM}
-# else
-#     echo "skip"
-# fi
 
 ########################################
 # echo "run combine_counts python script"
