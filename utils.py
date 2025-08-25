@@ -1,3 +1,4 @@
+import gzip
 import subprocess
 from io import StringIO
 
@@ -98,3 +99,15 @@ def read_VCF(vcf_file: str, phased=False):
         snps.loc[:, "PS"] = snps["PS"].astype("Int64")
     snps = snps.reset_index(drop=True)
     return snps
+
+def load_hairs(hair_file: str, smoothing=True, alpha=1):
+    """
+    load (nsnp, 4) hair tsv file, +alpha smoothing
+    """
+    hairs = None
+    with gzip.open(hair_file, "rt") as f:
+        hairs = np.loadtxt(f, delimiter="\t", dtype=np.int16)
+    hairs = hairs.astype(np.float32)
+    if smoothing:
+        hairs[:, :] += alpha
+    return hairs
