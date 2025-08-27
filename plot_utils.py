@@ -88,17 +88,21 @@ def plot_1d2d(
     clusters=None,
     expected_rdrs=None,
     expected_bafs=None,
+    plot_potts=False
 ):
+    print("plot 1d2d BAF and RDRs")
     os.makedirs(out_dir, exist_ok=True)
-    bin_file = os.path.join(bb_dir, "bin_position.tsv.gz")
+    bin_file = os.path.join(bb_dir, "bin_info.tsv.gz")
     cov_matrix = os.path.join(bb_dir, "bin_matrix.cov.npz")
     baf_matrix = os.path.join(bb_dir, "bin_matrix.baf.npz")
-    rdr_matrix = os.path.join(bb_dir, "bin_matrix.rdr_corr.npz")
+    rdr_matrix = os.path.join(bb_dir, "bin_matrix.rdr.npz")
+    potts_matrix = os.path.join(bb_dir, "bin_matrix.potts.npz")
 
     bb = pd.read_table(bin_file, sep="\t")
     cov_mat = np.load(cov_matrix)["mat"].astype(np.float64)
     baf_mat = np.load(baf_matrix)["mat"].astype(np.float64)
     rdr_mat = np.load(rdr_matrix)["mat"].astype(np.float64)
+    potts_mat = np.load(potts_matrix)["mat"].astype(np.int8)
 
     nsamples = baf_mat.shape[1]
     samples = ["normal"] + [f"tumor{i}" for i in range(1, nsamples)]
@@ -117,11 +121,23 @@ def plot_1d2d(
     ) = ret
 
     sns.set_style("whitegrid")
+
+    si2cluster_map = {i: 0 for i in range(nsamples)} # all samples use first set of cluster id, by default.
+    if plot_potts and not clusters is None:
+        raise ValueError("cannot plot both potts and clusters")
+    else:
+        if not clusters is None:
+            assert len(clusters) == len(bb)
+            print(f"plot given clusters")
+            clusters = clusters.reshape(1, len(clusters))
+        if plot_potts:
+            print(f"plot potts labels")
+            clusters = potts_mat.T # (2, nbins)
+            for i in range(1, nsamples):
+                si2cluster_map[i] = 1 # all tumor samples use tumor-specific potts labels.
     if clusters is None:
-        clusters = np.ones(len(bb))
-    clusters_hue = clusters
-    cluster_ids = sorted(list(np.unique(clusters)))
-    num_cluster = len(cluster_ids)
+        clusters = np.ones((1, len(bb)))
+    num_cluster = clusters.shape[1]
     if num_cluster > 8:
         palette = sns.color_palette("husl", n_colors=num_cluster)
     else:
@@ -150,6 +166,9 @@ def plot_1d2d(
             rdrs = np.ones(len(bb_positions))
         else:
             rdrs = rdr_mat[:, si - 1]
+        
+        si_clusters = clusters[si2cluster_map[si]]
+        si_cluster_ids = np.unique(si_clusters)
 
         ########################################
         if si == 0: # normal sample
@@ -173,19 +192,12 @@ def plot_1d2d(
             plt.savefig(out2d, dpi=300, format="png")
             plt.close(fig)
         else:
-            if not clusters is None:
-                g0 = sns.JointGrid(
-                    x=bafs,
-                    y=rdrs,
-                    hue=clusters_hue,
-                    palette=palette,
-                )
-            else:
-                g0 = sns.JointGrid(
-                    x=bafs,
-                    y=rdrs,
-                )
-
+            g0 = sns.JointGrid(
+                x=bafs,
+                y=rdrs,
+                hue=si_clusters,
+                palette=palette,
+            )
             g0.refline(x=0.50)
             g0.plot_joint(sns.scatterplot, s=markersize, legend=False, edgecolors="none")
             g0.plot_marginals(
@@ -200,7 +212,7 @@ def plot_1d2d(
             if not expected_bafs is None and not expected_rdrs is None:
                 exp_bafs = expected_bafs[:, si]
                 exp_rdrs = expected_rdrs[:, si - 1] if si > 0 else np.ones(len(exp_bafs))
-                for ci, cluster_id in enumerate(cluster_ids):
+                for ci, cluster_id in enumerate(si_cluster_ids):
                     center_text = str(cluster_id)
                     fontdict = {"fontsize": 10}
                     g0.ax_joint.text(exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
@@ -229,7 +241,7 @@ def plot_1d2d(
                     ax=axes[ai],
                     s=markersize,
                     color=colors_,
-                    hue=clusters_hue,
+                    hue=si_clusters,
                     palette=palette,
                 )
                 axes[0].legend(markerscale=6)
@@ -271,7 +283,7 @@ def plot_1d2d(
             rdr_lines = []
             baf_lines = []
             bl_colors = [(0, 0, 0, 1)] * len(clusters)
-            for ci, cluster_id in enumerate(cluster_ids):
+            for ci, cluster_id in enumerate(si_cluster_ids):
                 exp_baf = expected_bafs[int(ci), si]
                 exp_rdr = expected_rdrs[int(ci), si - 1] if si > 0 else 1.0
                 my_starts = bb_starts[clusters == cluster_id]
