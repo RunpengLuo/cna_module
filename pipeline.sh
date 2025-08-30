@@ -189,10 +189,13 @@ if [[ ! -f ${phase_file} ]]; then
         --reference=${REFERENCE} \
         --snp-file=${het_snp_file} \
         --mappingQuality=${minMAPQ} \
-        --out-prefix="${phase_dir}/phased" \
+        --out-prefix="${TMPDIR}/phased.raw" \
         --pb --threads=${numThreads} &>"${LOGDIR}/longphase.log"
     echo "longphase is finished"
     date
+
+    python ${SCRIPT_DIR}/filter_unphased.sh ${TMPDIR}/phased.raw.vcf \
+        ${phase_dir}/phased.vcf    
 
     extractHAIRS --bam ${NORMAL_BAM} \
                 --VCF ${phase_dir}/phased.vcf \
@@ -222,9 +225,15 @@ if [[ ! -f ${phase_file} ]]; then
             ${TMPDIR}/Tumor.fragments.full.txt \
             ${phase_file} \
             ${phase_dir}/Tumor.hairs.tsv.gz
+    date
 else
     echo "skip"
 fi
+
+# files
+# allele/sample_ids.tsv  snp_info.tsv.gz  snp_matrix.dp.npz snp_matrix.alt.npz  snp_matrix.ref.npz  snps.1pos
+# phase/phased.vcf.gz Normal.hairs.tsv.gz Tumor.hairs.tsv.gz
+# 
 
 ########################################
 # echo "run combine_counts python script"
