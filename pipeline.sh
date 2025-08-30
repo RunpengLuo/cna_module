@@ -194,7 +194,7 @@ if [[ ! -f ${phase_file} ]]; then
     echo "longphase is finished"
     date
 
-    python ${SCRIPT_DIR}/filter_unphased.sh ${TMPDIR}/phased.raw.vcf \
+    bash ${SCRIPT_DIR}/filter_unphased.sh ${TMPDIR}/phased.raw.vcf \
         ${phase_dir}/phased.vcf    
 
     extractHAIRS --bam ${NORMAL_BAM} \
