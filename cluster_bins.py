@@ -14,8 +14,11 @@ if __name__ == "__main__":
     args = sys.argv
     print(args)
     _, bb_dir, out_dir = args[:3]
+    
+    # hyper-parameter
+    baf_tol = 0.02 # collapse to 0.5 if estimated BAF around 0.5-baf_tol and 0.5+baf_tol
 
-    # hyper-parameters
+    # model-parameters
     tau = 1e-12
     minK = 2
     maxK = 10
@@ -56,9 +59,9 @@ if __name__ == "__main__":
 
     X_in = X
     X_in_init = mirror_baf(X_in, nsamples)
-    # # estimate global-BAF-variance from normal
-    # est_baf_var = np.var(bafs[:, 0], ddof=1)
-    # print(f"estimated normal BAF variance {est_baf_var:.3f}")
+    # estimate global-BAF-variance from normal
+    est_baf_var = np.var(bafs[:, :nsamples], ddof=1, axis=0)
+    print(f"estimated normal BAF variance {est_baf_var.round(3)}")
 
     # TODO RDR is not gaussian shape, and also has variance propto mean
     # proper standardization may needed to balance between baf and rdr
@@ -79,11 +82,19 @@ if __name__ == "__main__":
 
     # priors
     baf_weight = 1.0
-    rdr_weight = 0.5
+    rdr_weight = 1.0
     means_prior = [0.5, 1.0]
-    means_weight = [1e-2, 1e-2]
-    covars_prior = [1e-2, 1e-2]
-    covars_weight = [1.0, 1.0]
+    means_weight = [1e-3, 1e-3]
+
+    rdr_alpha = 1e-3
+    rdr_beta = 1e-3
+    prior_baf_mode = np.mean(est_baf_var)
+    baf_alpha = 5
+    baf_beta = prior_baf_mode * (baf_alpha + 1)
+
+    covars_alpha = [baf_alpha, rdr_alpha]
+    covars_beta = [baf_beta, rdr_beta]
+    print(f"inverse-gamma covars_prior: alpha={covars_alpha}, beta={covars_beta}")
 
 
     # hmm output
@@ -115,9 +126,9 @@ if __name__ == "__main__":
                 random_state=s,
                 means_weight=means_weight,
                 means_prior=means_prior,
-                covars_prior=covars_prior,
-                covars_weight=covars_weight,
-                n_iter=n_iter
+                covars_alpha=covars_alpha,
+                covars_beta=covars_beta,
+                n_iter=n_iter,
             )
             model.startprob_ = np.ones(K) / K  # s
             model.transmat_ = A # t
@@ -195,6 +206,8 @@ if __name__ == "__main__":
                     expected_baf_mean[k, 1 + i] = max(means[label2k[label], i], 1 - means[label2k[label], i])
                 else:
                     expected_baf_mean[k, 1 + i] = min(means[label2k[label], i], 1 - means[label2k[label], i])
+            if np.mean(np.abs(expected_baf_mean[k, 1:] - 0.5)) <= baf_tol:
+                expected_baf_mean[k, 1:] = 0.5
             baf_vars = np.mean((mhbafs[label_mask, :] - expected_baf_mean[k, 1:]) ** 2, axis=0)
             expected_baf_std[k, 1:] = np.sqrt(baf_vars)
 

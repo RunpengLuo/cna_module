@@ -59,9 +59,9 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         transmat_prior=1.0,
         weights_prior=2.0,
         means_prior=[0.5, 1.0],
-        means_weight=[1e-2, 1e-2],
-        covars_prior=[1e-2, 1e-2],
-        covars_weight=[1, 1],
+        means_weight=[1e-3, 1e-3],
+        covars_alpha=[1e-3, 1e-3],
+        covars_beta=[1e-3, 1e-3],
         algorithm="viterbi",
         random_state=None,
         n_iter=10,
@@ -103,8 +103,8 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         self.means_weight = means_weight
 
         # inv-gamma prior
-        self.covars_prior = covars_prior # alpha
-        self.covars_weight = covars_weight # beta
+        self.covars_alpha = covars_alpha # alpha
+        self.covars_beta = covars_beta # beta
 
     # TODO better means and covariance init?
     def _init(self, X, lengths=None):
@@ -275,8 +275,8 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         nm = self.n_mix
 
         # print("updates")
-        # print("weights")
-        # print(self.weights_)
+        # # print("weights")
+        # # print(self.weights_)
         # print("means")
         # print(self.means_)
         # print("covars")
@@ -316,12 +316,12 @@ class CONSTRAINED_GMMHMM(BaseHMM):
             c_d = stats["post_sum"][:, None]
 
             # diag-covariance priors
-            [baf_alpha, rdr_alpha] = self.covars_prior
-            [baf_beta, rdr_beta] = self.covars_weight
+            [baf_alpha, rdr_alpha] = self.covars_alpha
+            [baf_beta, rdr_beta] = self.covars_beta
             c_n[:, :self.bafdim] += 2 * baf_beta
             c_n[:, self.bafdim:] += 2 * rdr_beta
-            self.covars_[:, :self.bafdim] = c_n[:, :self.bafdim] / (c_d + 1 + 2 * (baf_alpha + 1))
-            self.covars_[:, self.bafdim:] = c_n[:, self.bafdim:] / (c_d + 1 + 2 * (rdr_alpha + 1))
+            self.covars_[:, :self.bafdim] = c_n[:, :self.bafdim] / (c_d + 2 * (baf_alpha + 1))
+            self.covars_[:, self.bafdim:] = c_n[:, self.bafdim:] / (c_d + 2 * (rdr_alpha + 1))
 
         if "t" in self.params and self.diag_transmat:
             denoms = stats["denoms"]
