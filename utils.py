@@ -89,7 +89,7 @@ def read_VCF(vcf_file: str, phased=False):
     if phased:
         # Drop entries without phasing output
         if "PS" not in snps.columns:
-            snps.loc[:, "PS"] = 0
+            snps.loc[:, "PS"] = 1
         snps = snps[(~snps["GT"].isna()) & snps["GT"].str.contains(r"\|", na=False)]
         snps["GT"] = snps["GT"].apply(func=lambda v: v[0])
         snps.loc[:, "GT"] = snps["GT"].astype("Int8")

@@ -88,24 +88,20 @@ def grid_search_beta(delta: np.ndarray, betas):
     best_beta, best_states, best_cost = best
     return best_beta, best_states, best_cost, results
 
-def potts_segmentation(snp_info: pd.DataFrame, icl_delta: np.ndarray):
+def potts_segmentation(bin_ids: np.ndarray, snp_info: pd.DataFrame, costs: np.ndarray):
     """
     for each region, perform Potts segmentation
     return a 1D binary state array
     """
     region_ids = snp_info["region_id"].unique()
     snp_info_grps_reg = snp_info.groupby(by="region_id", sort=False)
-    bin_ids = snp_info["bin_id"].unique()
-
-    bin_ids = snp_info["bin_id"].unique()
-    print(f"Number of bins: {len(bin_ids)}")
     potts_states = np.zeros((len(bin_ids),), dtype=np.int8)
     for region_id in region_ids:
         snp_reg = snp_info_grps_reg.get_group(region_id)
         snp_bin_ids = snp_reg["bin_id"].unique()
-        icl_delta_reg = icl_delta[snp_bin_ids]
-        betas = np.log(len(icl_delta_reg)) * np.array([0.5, 1, 2, 3, 4])
-        best_beta, states, cost, summary = grid_search_beta(icl_delta_reg, betas)
+        costs_reg = costs[snp_bin_ids]
+        betas = np.log(len(costs_reg)) * np.array([0.1, 0.5, 1, 2, 3, 4])
+        best_beta, states, cost, summary = grid_search_beta(costs_reg, betas)
         potts_states[snp_bin_ids] = states
         # print(best_beta, states, cost, summary)    
     return potts_states

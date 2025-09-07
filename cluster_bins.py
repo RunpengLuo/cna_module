@@ -6,9 +6,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from utils import *
-from hmm_models import *
 from plot_utils import plot_1d2d
-from hmm_models2 import MIXBAFHMM, mirror_baf, split_X
+from constrained_gmmhmm import *
 
 if __name__ == "__main__":
     ##################################################
@@ -16,15 +15,12 @@ if __name__ == "__main__":
     print(args)
     _, bb_dir, out_dir = args[:3]
 
+    # hyper-parameters
     tau = 1e-12
     minK = 2
-    maxK = 8
+    maxK = 10
     restarts = 10
-
-    # model_type = "unmirrored"
-    model_type = "mirrored"
-    # model_type = "gaussianHMM"
-    print(f"model={model_type}")
+    n_iter = 10
 
     os.makedirs(out_dir, exist_ok=True)
     plot_dir = os.path.join(out_dir, "plots")
@@ -33,9 +29,9 @@ if __name__ == "__main__":
     os.makedirs(bbc_dir, exist_ok=True)
 
     bb_file = os.path.join(bb_dir, "bulk.bb")
-    bin_pfile = os.path.join(bb_dir, "bin_position.tsv.gz")
+    bin_pfile = os.path.join(bb_dir, "bin_info.tsv.gz")
     baf_mfile = os.path.join(bb_dir, "bin_matrix.baf.npz")
-    rdr_mfile = os.path.join(bb_dir, "bin_matrix.rdr_corr.npz")
+    rdr_mfile = os.path.join(bb_dir, "bin_matrix.rdr.npz")
 
     ##################################################
     print("load arguments")
@@ -44,11 +40,6 @@ if __name__ == "__main__":
     rdrs = np.load(rdr_mfile)["mat"].astype(np.float64)
     (nsegments, nsamples) = rdrs.shape
     assert len(bins) == nsegments, f"unmatched {len(bins)} and {nsegments}"
-    # assign region id for consecutive segments
-    same_chr = bins["#CHR"] == bins["#CHR"].shift()
-    adj_pos = bins["START"] == bins["END"].shift()
-    new_cluster = ~(same_chr & adj_pos)
-    bins["region_id"] = new_cluster.cumsum()
 
     ##################################################
     print("prepare HMM inputs")
@@ -56,11 +47,44 @@ if __name__ == "__main__":
     X_bafs = bafs[:, 1:]  # ignore normal
     X_rdrs = rdrs[:, :]
     X = np.concatenate([X_bafs, X_rdrs], axis=1)
-    mhbafs = split_X(mirror_baf(X, nsamples), nsamples)[0]
 
     _nsegments = np.sum(X_lengths)
     assert _nsegments == nsegments, f"unmatched {_nsegments} and {nsegments}"
     print(f"#segments={nsegments}")
+
+    mhbafs = split_X(mirror_baf(X, nsamples), nsamples)[0]
+
+    X_in = X
+    X_in_init = mirror_baf(X_in, nsamples)
+    # # estimate global-BAF-variance from normal
+    # est_baf_var = np.var(bafs[:, 0], ddof=1)
+    # print(f"estimated normal BAF variance {est_baf_var:.3f}")
+
+    # TODO RDR is not gaussian shape, and also has variance propto mean
+    # proper standardization may needed to balance between baf and rdr
+    # in likelihood contribution
+    # print(f"RDR mixture variance={np.var(X_rdrs, axis=0)}")
+    # rdr_scale = np.sqrt(est_baf_var / np.var(X_rdrs, axis=0))
+    # print(f"rdr scale={rdr_scale}")
+
+    # X_rdrs_rescaled = X_rdrs * rdr_scale
+    # X_in = np.concatenate([X_bafs, X_rdrs_rescaled], axis=1)
+    # X_in_init = mirror_baf(X_in, nsamples)
+
+    # X_scaler, X_in = standardize_data(X, nsamples)
+    # X_in_init = X_in[np.mean(X[:, :nsamples], axis=1) <= 0.5]
+
+    # X_in[:, nsamples:] = np.log2(X_in[:, nsamples:])
+    # log-transform RDR to stablize variance
+
+    # priors
+    baf_weight = 1.0
+    rdr_weight = 0.5
+    means_prior = [0.5, 1.0]
+    means_weight = [1e-2, 1e-2]
+    covars_prior = [1e-2, 1e-2]
+    covars_weight = [1.0, 1.0]
+
 
     # hmm output
     all_labels = np.zeros((maxK + 1, nsegments), dtype=np.int32)
@@ -75,96 +99,118 @@ if __name__ == "__main__":
 
     for K in range(minK, maxK + 1):
         print(f"running HMM on K={K}")
-        my_best_ll = -1 * np.inf
-        my_best_labels = None
-        my_best_model = None
-        my_best_means = None
+        best_ll = -1 * np.inf
+        best_model = {"model": None, "labels": None, "means": None, "init_means": None, "init_covs": None}
         for s in range(restarts):
             A = make_transmat(1 - tau, K)
             assert np.all(A > 0), "unstable tau"
-            if model_type == "mirrored":
-                model = DiagGHMM(
-                    n_components=K,
-                    init_params="mc",
-                    params="smct",
-                    covariance_type="diag",
-                    # covariance_type="full",
-                    random_state=s,
-                )
-            elif model_type == "unmirrored":
-                model = MIXBAFHMM(
-                        bafdim=nsamples,
-                        n_components=K,
-                        init_params="mc",
-                        params="smct",
-                        random_state=s
-                )
-            elif model_type == "gaussianHMM":
-                model = GaussianHMM(
-                    n_components=K,
-                    init_params="mc",
-                    params="smct",
-                    covariance_type="diag",
-                    random_state=s
-                )
-            else:
-                raise NotImplementedError(f"{model_type}")
+            model = CONSTRAINED_GMMHMM(
+                bafdim=nsamples,
+                baf_weight=baf_weight,
+                rdr_weight=rdr_weight,
+                n_components=K,
+                init_params="mcw",
+                params="smct",
+                # params="smctw",
+                random_state=s,
+                means_weight=means_weight,
+                means_prior=means_prior,
+                covars_prior=covars_prior,
+                covars_weight=covars_weight,
+                n_iter=n_iter
+            )
             model.startprob_ = np.ones(K) / K  # s
-            # model.transmat_ = A # t
-
-            transmat = np.full((K, K), 1e-4)
-            np.fill_diagonal(transmat, 1 - (K - 1) * 1e-4)
-            model.transmat_ = transmat
-
-            model.fit(X, X_lengths)
+            model.transmat_ = A # t
+            model._init(X_in_init, None)
+            model.init_params = ""
+            init_means = np.copy(model.means_)
+            init_covs = np.copy(model.covars_)
+            model.fit(X_in, X_lengths)
             if not model.monitor_.converged:
                 print(f"warning, model is not coverged K={K}, restart={s}")
-
             # Viterbi decoding
-            prob, labels = model.decode(X, X_lengths, algorithm="map")
-            # print(prob)
-            all_lls[K, s] = prob
-            if prob > my_best_ll:
-                my_best_labels = labels
-                my_best_ll = prob
-                my_best_model = model
-                my_best_means = model.means_
+            ll, labels = model.decode(X_in, X_lengths, algorithm="map")
+            all_lls[K, s] = ll
+            if ll > best_ll:
+                best_ll = ll
+                best_model["model"] = model
+                best_model["labels"] = labels
+                best_model["init_means"] = init_means
+                best_model["init_covs"] = init_covs
+
+        print(f"ll={best_ll}")
+        model = best_model["model"]
+        raw_labels = best_model["labels"]
+        raw_init_means = best_model["init_means"]
+        raw_init_covs = best_model["init_covs"]
+        raw_means = model.means_
+        raw_covars = model.covars_
+        weights = model.weights_
+
+        # print(X_scaler.mean_)
+        # print(raw_means)
+        # means = raw_means * X_scaler.scale_ + X_scaler.mean_
+        # means[:, :nsamples] += 0.5
+        # covars = raw_covars * X_scaler.scale_**2
+        # means[:, nsamples:] = np.exp2(means[:, nsamples:])
+
+        means = raw_means
+        covars = raw_covars
 
         # remap labels
         j = 1
         k2label = {}
         label2k = {}
-        for i, _ in Counter(my_best_labels).most_common():
+        for i, _ in Counter(raw_labels).most_common():
             k2label[i] = j
             label2k[j] = i
             j += 1
         labels = list(k2label.values())
         uniq_labels[K] = labels
-        all_labels[K, :] = np.array([k2label[v] for v in my_best_labels])
-        all_models.append(my_best_model)
-        all_bics[K] = my_best_model.bic(X)
+        all_labels[K, :] = np.array([k2label[v] for v in raw_labels])
+        all_models.append(model)
+        all_bics[K] = model.bic(X_in)
 
-        print(my_best_means)
-
-        # compute expected RDR and BAF for each K
-        expected_rdr = np.zeros((len(labels), nsamples), dtype=np.float64)
-        expected_baf = np.zeros((len(labels), nsamples + 1), dtype=np.float64)
-        centroid_baf = np.zeros((len(labels), nsamples + 1), dtype=np.float64)
         for k in range(len(labels)):
             label = labels[k]
-            expected_rdr[k, :] = np.mean(rdrs[all_labels[K, :] == label, :], axis=0)
-            # enforce mhBAF constraints here
-            my_mhbafs = mhbafs[all_labels[K, :] == label, :]
-            expected_baf[k, 1:] = np.mean(my_mhbafs, axis=0)
-            # print(label2k[label], label2k)
-            centroid_baf[k, 1:] = my_best_means[label2k[label], :nsamples]
+            print(labels[k], np.sum(raw_labels == label2k[label]), weights[label2k[label], :])
+            # print(raw_means[label2k[label], :], raw_covars[label2k[label], :])
+            print(raw_init_means[label2k[label], :], raw_init_covs[label2k[label], :])
+            print(means[label2k[label], :], covars[label2k[label], :])
+        # compute expected RDR and BAF for each K
+        expected_rdr_mean = np.zeros((len(labels), nsamples), dtype=np.float64)
+        expected_rdr_std = np.zeros((len(labels), nsamples), dtype=np.float64)
+        expected_baf_mean = np.zeros((len(labels), nsamples + 1), dtype=np.float64)
+        expected_baf_std = np.zeros((len(labels), nsamples + 1), dtype=np.float64)
+        for k in range(len(labels)):
+            label = labels[k]
+            label_mask = all_labels[K, :] == label
+            expected_rdr_mean[k, :] = np.mean(rdrs[label_mask, :], axis=0)
+            expected_rdr_std[k, :] = np.std(rdrs[label_mask, :], axis=0)
 
-        expected_rdrs[K] = expected_rdr
-        expected_bafs[K] = expected_baf
-        centroid_bafs[K] = centroid_baf
+            baf_means = means[label2k[label], :nsamples]
+            for i in range(nsamples):
+                # decide cluster mhBAF based on average mhBAF per sample
+                if np.mean(mhbafs[label_mask, i]) > 0.5:
+                    expected_baf_mean[k, 1 + i] = max(means[label2k[label], i], 1 - means[label2k[label], i])
+                else:
+                    expected_baf_mean[k, 1 + i] = min(means[label2k[label], i], 1 - means[label2k[label], i])
+            baf_vars = np.mean((mhbafs[label_mask, :] - expected_baf_mean[k, 1:]) ** 2, axis=0)
+            expected_baf_std[k, 1:] = np.sqrt(baf_vars)
+
+        expected_rdrs[K] = [expected_rdr_mean, expected_rdr_std]
+        expected_bafs[K] = [expected_baf_mean[:, 1:], expected_baf_std[:, 1:]]
     
         plot_1d2d(
-            bb_dir, plot_dir, f"K{K}_", False, all_labels[K], expected_rdr, expected_baf
+            bb_dir=bb_dir, 
+            out_dir=plot_dir, 
+            out_prefix=f"K{K}_", 
+            plot_normal=False,
+            clusters=all_labels[K], 
+            expected_rdrs=expected_rdr_mean, 
+            expected_bafs=expected_baf_mean,
+            fitted_means=means,
+            fitted_covs=covars
         )
 
     opt_K = np.argmin(all_bics)
@@ -176,6 +222,11 @@ if __name__ == "__main__":
 
     bb = pd.read_csv(bb_file, sep="\t")
     samples = bb["SAMPLE"].unique()
+
+    # save mhBAF
+    for i, sample in enumerate(samples):
+        bb.loc[bb["SAMPLE"] == sample, "BAF"] = mhbafs[:, i]
+
     bb["CLUSTER"] = 0
     # save to bulk.bbc
     for K in range(minK, maxK + 1):
@@ -189,22 +240,26 @@ if __name__ == "__main__":
         labels = uniq_labels[K]
         seg_rows = []
         bb_grps = bb.groupby(by="CLUSTER", sort=False)
-        bb_bafs = expected_bafs[K][:, 1:]
-        bb_rdrs = expected_rdrs[K]
+        [bb_bafs_means, bb_bafs_stds] = expected_bafs[K]    
+        [bb_rdrs_means, bb_rdrs_stds] = expected_rdrs[K]
         for l, label in enumerate(labels):
             bb_grp = bb_grps.get_group(label)
             for s, sample in enumerate(samples):
                 bb_sample = bb_grp.loc[bb_grp["SAMPLE"] == sample, :]
-                seg_rows.append([label, sample, len(bb_sample), bb_rdrs[l, s], 
-                                 bb_sample["#SNPS"].sum(), bb_sample["COV"].mean(), 
-                                 bb_sample["ALPHA"].sum(), bb_sample["BETA"].sum(),
-                                 bb_bafs[l, s]])
+
+                # seg_rows.append([label, sample, len(bb_sample), bb_rdrs[l, s], 
+                #                  bb_sample["#SNPS"].sum(), bb_sample["COV"].mean(), 
+                #                  bb_sample["ALPHA"].sum(), bb_sample["BETA"].sum(),
+                #                  bb_bafs[l, s]])
+                seg_nsnps = bb_sample["#SNPS"].sum()
+                ave_cov = np.sum(bb_sample["COV"].to_numpy() * bb_sample["#SNPS"].to_numpy()) / seg_nsnps
+                seg_rows.append([label, sample, len(bb_sample), bb_sample["#SNPS"].sum(), ave_cov,
+                                 bb_bafs_means[l, s], bb_bafs_stds[l, s], bb_rdrs_means[l, s], bb_rdrs_stds[l, s]
+                                 ])
         seg = pd.DataFrame(
             data=seg_rows,
-            columns=["#ID", "SAMPLE", "#BINS", "RD", "#SNPS", "COV", "ALPHA", "BETA", "BAF"]
+            # columns=["#ID", "SAMPLE", "#BINS", "RD", "#SNPS", "COV", "ALPHA", "BETA", "BAF"]
+            columns=["#ID", "SAMPLE", "#BINS", "#SNPS", "COV", "BAF", "BAF-std", "RD", "RD-std"]
         )
         bb.to_csv(bbc_file, sep="\t", header=True, index=False)
         seg.to_csv(seg_file, sep="\t", header=True, index=False)
-    # we can compute cluster variance here,
-
-    # elbow_bic(minK, maxK, all_bics, "bic", out_dir)

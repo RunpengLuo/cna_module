@@ -10,8 +10,28 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib.collections import LineCollection
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.patches import Ellipse
+
 
 from utils import *
+
+def add_gaussian_ellipse(ax, mean, cov, n_std=2.0, **kwargs):
+    # Eigen-decompose covariance to get principal axes
+    vals, vecs = np.linalg.eigh(cov)
+    # sort large -> small
+    order = vals.argsort()[::-1]
+    vals, vecs = vals[order], vecs[:, order]
+    # width/height: 2*n_std*sqrt(eigenvals)
+    width, height = 2 * n_std * np.sqrt(vals)
+    # angle in degrees from x-axis of the largest eigenvector
+    angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
+    ell = Ellipse(
+        xy=mean, width=width, height=height, angle=angle,
+        fill=True, lw=2, color="black", **kwargs
+    )
+    ell.set_clip_box(ax.bbox)
+    ell.set_alpha(0.1)
+    ax.add_patch(ell)
 
 
 def build_ch_boundary(bb: pd.DataFrame):
@@ -88,21 +108,34 @@ def plot_1d2d(
     clusters=None,
     expected_rdrs=None,
     expected_bafs=None,
-    plot_potts=False
+    fitted_means=None,
+    fitted_covs=None,
+    mirrored_baf=False,
+    plot_potts=False,
+    plot_alpha_beta=False,
+    plot_cov=False,
+    baf_file="bin_matrix.baf.npz",
+    rdr_file="bin_matrix.rdr.npz",
+    potts_states=None
 ):
     print("plot 1d2d BAF and RDRs")
     os.makedirs(out_dir, exist_ok=True)
-    bin_file = os.path.join(bb_dir, "bin_info.tsv.gz")
-    cov_matrix = os.path.join(bb_dir, "bin_matrix.cov.npz")
-    baf_matrix = os.path.join(bb_dir, "bin_matrix.baf.npz")
-    rdr_matrix = os.path.join(bb_dir, "bin_matrix.rdr.npz")
-    potts_matrix = os.path.join(bb_dir, "bin_matrix.potts.npz")
-
-    bb = pd.read_table(bin_file, sep="\t")
-    cov_mat = np.load(cov_matrix)["mat"].astype(np.float64)
-    baf_mat = np.load(baf_matrix)["mat"].astype(np.float64)
-    rdr_mat = np.load(rdr_matrix)["mat"].astype(np.float64)
-    potts_mat = np.load(potts_matrix)["mat"].astype(np.int8)
+    bb = pd.read_table(os.path.join(bb_dir, "bin_info.tsv.gz"), sep="\t")
+    baf_mat = np.load(os.path.join(bb_dir, baf_file))["mat"].astype(np.float64)
+    rdr_mat = np.load(os.path.join(bb_dir, rdr_file))["mat"].astype(np.float64)
+    # if plot_potts:
+    #     potts_states = np.load(os.path.join(bb_dir, "bin_matrix.potts.npz"))["mat"].astype(np.int8)
+    
+    nrow_1d = 2
+    if plot_cov:
+        nrow_1d += 1
+        cov_mat = np.load(os.path.join(bb_dir, "bin_matrix.cov.npz"))["mat"].astype(np.float64)
+    
+    if plot_alpha_beta:
+        assert plot_cov
+        nrow_1d += 2
+        alpha_mat = np.load(os.path.join(bb_dir, "bin_matrix.alpha.npz"))["mat"].astype(np.int32)
+        beta_mat = np.load(os.path.join(bb_dir, "bin_matrix.beta.npz"))["mat"].astype(np.int32)
 
     nsamples = baf_mat.shape[1]
     samples = ["normal"] + [f"tumor{i}" for i in range(1, nsamples)]
@@ -132,16 +165,16 @@ def plot_1d2d(
             clusters = clusters.reshape(1, len(clusters))
         if plot_potts:
             print(f"plot potts labels")
-            clusters = potts_mat.T # (2, nbins)
+            clusters = potts_states.T # (2, nbins)
             for i in range(1, nsamples):
                 si2cluster_map[i] = 1 # all tumor samples use tumor-specific potts labels.
     if clusters is None:
         clusters = np.ones((1, len(bb)))
-    num_cluster = clusters.shape[1]
-    if num_cluster > 8:
-        palette = sns.color_palette("husl", n_colors=num_cluster)
+    num_colors = max([len(np.unique(clusters[i])) for i in range(clusters.shape[0])])
+    if num_colors > 8:
+        palette = sns.color_palette("husl", n_colors=num_colors)
     else:
-        palette = sns.color_palette("Set2", n_colors=num_cluster)
+        palette = sns.color_palette("Set2", n_colors=num_colors)
     sns.set_palette(palette)
 
     markersize = float(max(2, 4 - np.floor(len(bb) / 500)))
@@ -160,7 +193,13 @@ def plot_1d2d(
         print(f"plot {sample}")
         out1d = os.path.join(out_dir, f"{out_prefix}{sample}.1D.png")
         out2d = os.path.join(out_dir, f"{out_prefix}{sample}.2D.png")
-        covs = cov_mat[:, si]
+
+        if plot_cov:
+            covs = cov_mat[:, si]
+        if plot_alpha_beta:
+            alphas = alpha_mat[:, si]
+            betas = beta_mat[:, si]
+
         bafs = baf_mat[:, si]
         if si == 0:
             rdrs = np.ones(len(bb_positions))
@@ -187,6 +226,7 @@ def plot_1d2d(
             med_baf = np.median(bafs)
             ax.set_title(f"{sample} mu={mu_baf:.3f} std={std_baf:.3f} med={med_baf:.3f}")
             ax.set_xlabel(xlabel="mhBAF")
+            ax.grid(False)
             colors_ = None
             plt.tight_layout()
             plt.savefig(out2d, dpi=300, format="png")
@@ -204,10 +244,17 @@ def plot_1d2d(
                 sns.histplot,
                 kde=True,
                 common_norm=False,
-                stat="density",
+                # stat="density",
+                # element="step"
             )
             scatter = g0.ax_joint.collections[0]
             colors_ = scatter.get_facecolors()
+            
+            # if not fitted_means is None:
+            #     for k in range(fitted_means.shape[0]):
+            #         print(fitted_means)
+            #         print(fitted_covs)
+            #         add_gaussian_ellipse(g0.ax_joint, fitted_means[k], fitted_covs[k])
 
             if not expected_bafs is None and not expected_rdrs is None:
                 exp_bafs = expected_bafs[:, si]
@@ -216,6 +263,8 @@ def plot_1d2d(
                     center_text = str(cluster_id)
                     fontdict = {"fontsize": 10}
                     g0.ax_joint.text(exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
+                    if not mirrored_baf:
+                        g0.ax_joint.text(1 - exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
                 g0.ax_joint.scatter(
                     x=exp_bafs,
                     y=exp_rdrs,
@@ -224,6 +273,15 @@ def plot_1d2d(
                     s=markersize_centroid,
                     linewidth=marker_bd_width,
                 )
+                if not mirrored_baf:
+                    g0.ax_joint.scatter(
+                        x=1 - exp_bafs,
+                        y=exp_rdrs,
+                        facecolors="none",
+                        edgecolors="black",
+                        s=markersize_centroid,
+                        linewidth=marker_bd_width,
+                    )
             g0.set_axis_labels(xlabel="mhBAF", ylabel="RDR")
             g0.figure.suptitle(sample)
             plt.tight_layout()
@@ -231,10 +289,19 @@ def plot_1d2d(
             plt.close(g0.figure)
 
         ########################################
-        fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(20, 4))
+        if nrow_1d < 3:
+            figsize=(20, 8)
+        else:
+            figsize=(20, 1.5 * nrow_1d)
+        fig, axes = plt.subplots(nrows=nrow_1d, ncols=1, figsize=figsize)
         gs = []
-        for ai, y in enumerate([rdrs, bafs, covs]):
-            if ai == 0 and not clusters is None:
+        plot_mats = [rdrs, bafs]
+        if plot_cov:
+            plot_mats.append(covs)
+        if plot_alpha_beta:
+            plot_mats.extend([alphas, betas])
+        for ai, y in enumerate(plot_mats):
+            if ai == 0:
                 g = sns.scatterplot(
                     x=bb_positions,
                     y=y,
@@ -255,7 +322,69 @@ def plot_1d2d(
             gs.append(g)
         gs[0].collections[0].set_facecolors(colors_)
         minBAF_, maxBAF_ = axes[1].get_ylim()
-        for ai in range(3):
+        axes[0].set_ylim(minRDR, maxRDR)
+        axes[0].set_ylabel("RDR")
+        axes[0].title.set_text(sample)
+        for yv in np.arange(minRDR, maxRDR, 1):
+            axes[0].hlines(
+                y=yv,
+                xmin=0,
+                xmax=chr_end,
+                colors="grey",
+                linewidth=0.5,
+                alpha=0.5
+            )
+
+        axes[1].set_ylabel("mhBAF")
+        axes[1].title.set_text("")
+        if mirrored_baf:
+            # add BAF 0.5 line
+            axes[1].hlines(
+                y=0.5,
+                xmin=0,
+                xmax=chr_end,
+                colors="grey",
+                linestyle=":",
+                linewidth=1,
+            )
+            axes[1].set_ylim(0, 0.51)
+            yticks = np.arange(0.0, 0.51, 0.1)
+            axes[1].set_yticks(yticks)
+            axes[1].set_yticklabels([f"{y:.1f}" for y in yticks])
+            for yv in np.arange(0.0, 0.41, 0.1):
+                axes[1].hlines(
+                    y=yv,
+                    xmin=0,
+                    xmax=chr_end,
+                    colors="grey",
+                    linewidth=0.5,
+                    alpha=0.5
+                )
+        else:
+            axes[1].set_ylim(0, 1.01)
+            yticks = [0.0, 0.25, 0.50, 0.75, 1.0]
+            axes[1].set_yticks(yticks)
+            axes[1].set_yticklabels([f"{y:.2f}" for y in yticks])
+            for yv in np.arange(0.0, 1.01, 0.1):
+                axes[1].hlines(
+                    y=yv,
+                    xmin=0,
+                    xmax=chr_end,
+                    colors="grey",
+                    linewidth=0.5,
+                    alpha=0.5
+                )
+
+        if plot_cov:
+            axes[2].set_ylabel("COV")
+            axes[2].title.set_text("")
+        if plot_alpha_beta:
+            axes[3].set_ylabel("ALPHA")
+            axes[3].title.set_text("")
+            axes[4].set_ylabel("BETA")
+            axes[4].title.set_text("")
+
+        for ai in range(nrow_1d):
             # add chromosome boundary
             axes[ai].vlines(
                 chr_bounds,
@@ -269,6 +398,8 @@ def plot_1d2d(
             # add centromere boxes
             for ch, gaps in chr_gaps.items():
                 for gap in gaps:
+                    if gap[1] - gap[0] < 10e6:
+                        continue
                     axes[ai].add_patch(
                         Rectangle(
                             (gap[0], 0),
@@ -282,12 +413,12 @@ def plot_1d2d(
         if not expected_bafs is None and not expected_rdrs is None:
             rdr_lines = []
             baf_lines = []
-            bl_colors = [(0, 0, 0, 1)] * len(clusters)
+            bl_colors = [(0, 0, 0, 1)] * len(si_clusters)
             for ci, cluster_id in enumerate(si_cluster_ids):
                 exp_baf = expected_bafs[int(ci), si]
                 exp_rdr = expected_rdrs[int(ci), si - 1] if si > 0 else 1.0
-                my_starts = bb_starts[clusters == cluster_id]
-                my_ends = bb_ends[clusters == cluster_id]
+                my_starts = bb_starts[si_clusters == cluster_id]
+                my_ends = bb_ends[si_clusters == cluster_id]
                 rdr_lines.extend(
                     [
                         [(my_starts[bi], exp_rdr), (my_ends[bi], exp_rdr)]
@@ -300,6 +431,14 @@ def plot_1d2d(
                         for bi in range(len(my_starts))
                     ]
                 )
+                if not mirrored_baf: # also plot mirrored BAF lines
+                    exp_baf2 = 1 - exp_baf
+                    baf_lines.extend(
+                        [
+                            [(my_starts[bi], exp_baf2), (my_ends[bi], exp_baf2)]
+                            for bi in range(len(my_starts))
+                        ]
+                    )
             axes[0].add_collection(
                 LineCollection(rdr_lines, linewidth=rdr_linewidth, colors=bl_colors)
             )
@@ -307,35 +446,55 @@ def plot_1d2d(
                 LineCollection(baf_lines, linewidth=baf_linewidth, colors=bl_colors)
             )
 
-        # add BAF 0.5 line
-        axes[1].hlines(
-            y=0.5,
-            xmin=0,
-            xmax=chr_end,
-            colors="grey",
-            linestyle=":",
-            linewidth=1,
-        )
-
-        axes[0].grid(False)
-        axes[0].set_ylim(minRDR, maxRDR)
-        axes[0].set_ylabel("RDR")
-        axes[0].title.set_text(sample)
-
-        axes[1].grid(False)
-        axes[1].set_ylim(minBAF_, maxBAF_)
-        axes[1].set_ylabel("mhBAF")
-        axes[1].title.set_text("")
-
-        axes[2].grid(False)
-        axes[2].set_ylabel("COV")
-        axes[2].title.set_text("")
-
         plt.setp(axes, xlim=(0, chr_end), xticks=xtick_chrs, xlabel="")
-        for ai in range(3):
+        for ai in range(nrow_1d):
             axes[ai].set_xticklabels(xlab_chrs, rotation=60, fontsize=8)
+            if ai < 2:
+                axes[ai].grid(False)
         # sns.move_legend(axes[0], "upper left", bbox_to_anchor=(1, 1), title=None)
         plt.tight_layout()
         fig.savefig(out1d, dpi=300, format="png")
         plt.close(fig)
     return
+
+def plot_2d(X: np.ndarray, labels=None, means=None, title="labels", height=3, s=3, out_file=None):
+    g0 = sns.JointGrid(
+        x=X[:, 0],
+        y=X[:, 1],
+        hue=labels,
+        palette=sns.color_palette("Set2", n_colors=len(np.unique(labels))),
+        height=height
+    )
+    g0.refline(x=0.50)
+    g0.plot_joint(sns.scatterplot, s=s, legend=False, edgecolors="none")
+    g0.plot_marginals(
+        sns.histplot,
+        kde=False,
+        common_norm=False,
+        # stat="density",
+        # element="step"
+    )
+    scatter = g0.ax_joint.collections[0]
+    colors_ = scatter.get_facecolors()  # reused in 1D plot
+    scatter.set_facecolors(colors_)
+    if not means is None:
+        g0.ax_joint.scatter(x=means[:, 0], y=means[:, 1], marker="x", c="black")
+    g0.set_axis_labels(xlabel="mhBAF", ylabel="RDR")
+    g0.figure.suptitle(title)
+    plt.tight_layout()
+    if not out_file is None:
+        g0.savefig(out_file, dpi=300, format="png")
+        plt.close(g0.figure)
+
+if __name__ == "__main__":
+    _, bb_dir = sys.argv
+    plot_1d2d(
+        bb_dir,
+        bb_dir,
+        plot_normal=True,
+        clusters=None,
+        expected_rdrs=None,
+        expected_bafs=None,
+        plot_cov=True,
+        plot_alpha_beta=True
+    )
