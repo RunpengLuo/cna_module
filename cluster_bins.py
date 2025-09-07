@@ -84,7 +84,7 @@ if __name__ == "__main__":
     baf_weight = 1.0
     rdr_weight = 1.0
     means_prior = [0.5, 1.0]
-    means_weight = [1e-3, 1e-3]
+    means_weight = [1e-2, 1e-2]
 
     rdr_alpha = 1e-3
     rdr_beta = 1e-3

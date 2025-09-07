@@ -31,7 +31,7 @@ minMAPQ=20
 numThreads=8
 
 # binning parameters
-MSR=7500
+MSR=5000
 MTR=30
 READ_LENGTH=10000
 MSPB=20
@@ -236,27 +236,35 @@ fi
 # 
 
 ########################################
-# echo "run combine_counts python script"
-# date
-# bb_dir="${OUTDIR}/bb"
-# mkdir -p ${bb_dir}
-# test_file=${bb_dir}/sample_ids.tsv
-# if [[ ! -f ${test_file} ]]; then
-#     python -u ${SCRIPT_DIR}/combine_counts.py \
-#         ${phase_file} \
-#         ${rdr_dir} \
-#         ${bb_dir} \
-#         ${MSR} ${MTR} ${READ_LENGTH} ${MSPB} ${MBS}
-# else
-#     echo "skip"
-# fi
+echo "run combine_counts python script"
+date
+bb_dir="${OUTDIR}/bb"
+mkdir -p ${bb_dir}
+test_file=${bb_dir}/bulk.bb
+if [[ ! -f ${test_file} ]]; then
+    python -u ${SCRIPT_DIR}/combine_counts.py \
+        ${allele_dir} \
+        ${phase_dir} \
+        ${bb_dir} \
+        ${MSR}
+else
+    echo "skip"
+fi
 
 ########################################
-# echo "run cluster_bins python script TODO"
-# date
-# bbc_dir="${OUTDIR}/bbc"
-# # TODO
+echo "run cluster_bins python script"
+date
+bbc_dir="${OUTDIR}/bbc"
+mkdir -p ${bbc_dir}
+test_file=${bbc_dir}/bulk.bbc
+if [[ ! -f ${test_file} ]]; then
+    python -u ${SCRIPT_DIR}/cluster_bins.py \
+        ${bb_dir} \
+        ${bbc_dir}
+else
+    echo "skip"
+fi
 
-# rm -rf ${TMPDIR}
-# echo "Done"
-# date
+rm -rf ${TMPDIR}
+echo "Done"
+date
