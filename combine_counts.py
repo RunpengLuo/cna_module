@@ -213,8 +213,8 @@ if __name__ == "__main__":
     print(f"#meta-SNPs={num_metas}")
 
     meta_gts2d = np.zeros((num_metas, 2), dtype=np.int8)
-    meta_gts2d[:, 0] = meta_snps.apply(lambda x: x["GT"].iloc[0]).to_numpy()
-    meta_gts2d[:, 1] = meta_snps.apply(lambda x: x["GT"].iloc[-1]).to_numpy()
+    meta_gts2d[:, 0] = meta_snps["GT"].first().to_numpy()
+    meta_gts2d[:, 1] = meta_snps["GT"].last().to_numpy()
 
     if read_type == "TGS":
         first_idx_metas = meta_snps.apply(lambda x: x.index[0]).to_numpy()
