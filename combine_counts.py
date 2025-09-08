@@ -11,6 +11,7 @@ from plot_utils import plot_1d2d
 
 
 from baf_estimation import *
+from rdr_estimation import *
 
 
 # TODO, extend to multi-PS case, and then do phasing internally.
@@ -64,34 +65,6 @@ def adaptive_binning(
     return snp_info
 
 
-def compute_RDR(
-    bin_ids: np.ndarray,
-    snp_info: pd.DataFrame,
-    bases_mat: np.ndarray,
-    nbins: int,
-    ntumor_samples: int,
-):
-    print("compute RDR")
-    snp_grp_bins = snp_info.groupby(by="bin_id", sort=False)
-    rdr_raw_mat = np.zeros((nbins, ntumor_samples), dtype=np.float64)
-    for bin_id in bin_ids:
-        snp_bin = snp_grp_bins.get_group(bin_id)
-        snp_bin_idx = snp_bin.index.to_numpy()
-        agg_bases_normal = np.sum(bases_mat[snp_bin_idx, 0])
-        if agg_bases_normal > 0:
-            agg_bases_tumors = np.sum(bases_mat[snp_bin_idx, 1:], axis=0)
-            rdr_raw_mat[bin_id, :] = agg_bases_tumors / agg_bases_normal
-
-    # TODO normalization should be done based on allelic balanced bins
-    print("RDR library normalization")
-    total_bases_normal = np.sum(bases_mat[:, 0])
-    total_bases_tumors = np.sum(bases_mat[:, 1:], axis=0)
-    correction = total_bases_normal / total_bases_tumors
-    print(f"RDR normalization factor: {correction}")
-    rdr_mat_corr = rdr_raw_mat * correction[:, None]
-    return rdr_raw_mat, rdr_mat_corr
-
-
 if __name__ == "__main__":
     ##################################################
     args = sys.argv
@@ -99,8 +72,11 @@ if __name__ == "__main__":
     _, allele_dir, phase_dir, out_dir = sys.argv[:4]
     msr = int(sys.argv[4])
 
+    ref_file = "reference/T2T-CHM13v2.0.fasta"
+
     verbose = 1
     read_type = "TGS"
+    correct_gc = True
     mirror_mhBAF = False
     map_BAF = True
     phase_mode = "prior"
@@ -131,10 +107,6 @@ if __name__ == "__main__":
     out_baf_mat = os.path.join(out_dir, "bin_matrix.baf.npz")
     out_alpha_mat = os.path.join(out_dir, "bin_matrix.alpha.npz")
     out_beta_mat = os.path.join(out_dir, "bin_matrix.beta.npz")
-
-    # tmp files
-    out_rdr_raw_mat = os.path.join(out_dir, "bin_matrix.rdr_raw.npz")
-
     ##################################################
     print("load arguments")
     samples = pd.read_table(sample_file, sep="\t").loc[:, "SAMPLE"].tolist()
@@ -164,7 +136,7 @@ if __name__ == "__main__":
     print(f"#SNPs={num_snps}")
 
     snp_bss = snp_info["Blocksize"].to_numpy()
-    base_mat = dp_mat * snp_bss[:, None]
+    bases_mat = dp_mat * snp_bss[:, None]
     snp_pss = snp_info["PS"].to_numpy()
     snp_gts = snp_info["GT"].to_numpy().astype(np.int8)
     snp_gts2d = np.concatenate([snp_gts[:, None], snp_gts[:, None]], axis=1)
@@ -326,11 +298,24 @@ if __name__ == "__main__":
     np.savez_compressed(out_cov_mat, mat=cov_mat)
     np.savez_compressed(out_baf_mat, mat=baf_mat)
     ##################################################
-    rdr_raw_mat, rdr_mat = compute_RDR(
-        bin_ids, snp_info, base_mat, nbins, ntumor_samples
+    snp_grp_bins = snp_info.groupby(by="bin_id", sort=False, as_index=True)
+
+    bin_info = snp_grp_bins.agg(
+        **{
+            "#CHR": ("#CHR", "first"),
+            "START": ("START", "min"),
+            "END": ("END", "max"),
+            "region_id": ("region_id", "first"),
+        }
+    )
+    bin_info.loc[:, "#SNPS"] = snp_grp_bins.size().reset_index(drop=True)
+
+    ##################################################
+    rdr_mat = compute_RDR(
+        bin_ids, bin_info, snp_info, bases_mat, nbins, ntumor_samples,
+        correct_gc=correct_gc, ref_file=ref_file, out_dir=out_dir
     )
 
-    np.savez_compressed(out_rdr_raw_mat, mat=rdr_raw_mat)
     np.savez_compressed(out_rdr_mat, mat=rdr_mat)
 
     ##################################################
@@ -354,18 +339,7 @@ if __name__ == "__main__":
     )
 
     print("save bin_info")
-    snp_grp_bins = snp_info.groupby(by="bin_id", sort=False, as_index=True)
-
-    snp_bins = snp_grp_bins.agg(
-        **{
-            "#CHR": ("#CHR", "first"),
-            "START": ("START", "min"),
-            "END": ("END", "max"),
-            "region_id": ("region_id", "first"),
-        }
-    )
-    snp_bins.loc[:, "#SNPS"] = snp_grp_bins.size().reset_index(drop=True)
-    snp_bins.to_csv(
+    bin_info.to_csv(
         out_bin_file,
         sep="\t",
         header=True,
@@ -375,20 +349,20 @@ if __name__ == "__main__":
 
     bb_df = pd.DataFrame(
         {
-            "#CHR": np.repeat(snp_bins["#CHR"], ntumor_samples),
-            "START": np.repeat(snp_bins["START"], ntumor_samples),
-            "END": np.repeat(snp_bins["END"], ntumor_samples),
+            "#CHR": np.repeat(bin_info["#CHR"], ntumor_samples),
+            "START": np.repeat(bin_info["START"], ntumor_samples),
+            "END": np.repeat(bin_info["END"], ntumor_samples),
             "SAMPLE": np.tile(tumor_samples, nbins),
-            "#SNPS": np.repeat(snp_bins["#SNPS"], ntumor_samples),
+            "#SNPS": np.repeat(bin_info["#SNPS"], ntumor_samples),
         }
     )
 
     feature_mats = [
         cov_mat[:, 1:],
-        rdr_mat,
         baf_mat[:, 1:],
+        rdr_mat,
     ]
-    feature_names = ["COV", "RD", "BAF"]
+    feature_names = ["COV", "BAF", "RD"]
     for name, mat in zip(feature_names, feature_mats):
         bb_df[name] = mat.flatten()
 
