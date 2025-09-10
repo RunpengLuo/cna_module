@@ -214,7 +214,7 @@ if __name__ == "__main__":
                 expected_baf_mean[k, 1:] = 0.5
             else:
                 # MLE of BAF mean
-                expected_baf_mean[k, 1:] = np.mean(mhbafs[label_mask, 1:], axis=0)
+                expected_baf_mean[k, 1:] = np.mean(mhbafs[label_mask, :], axis=0)
             baf_vars = np.mean((mhbafs[label_mask, :] - expected_baf_mean[k, 1:]) ** 2, axis=0)
             expected_baf_std[k, 1:] = np.sqrt(baf_vars)
 
