@@ -209,7 +209,7 @@ if __name__ == "__main__":
             expected_rdr_std[k, :] = np.std(rdrs[label_mask, :], axis=0)
 
             baf_means = means[label2k[label], :nsamples]
-            if np.mean(np.abs(means[label2k[label], :] - 0.5)) <= baf_tol:
+            if np.mean(np.abs(baf_means - 0.5)) <= baf_tol:
                 # allelic balanced cluster, set BAF=0.5
                 expected_baf_mean[k, 1:] = 0.5
             else:
