@@ -151,12 +151,19 @@ if __name__ == "__main__":
 
         print(f"ll={best_ll}")
         model = best_model["model"]
+        transmat = model.transmat_
         raw_labels = best_model["labels"]
         raw_init_means = best_model["init_means"]
         raw_init_covs = best_model["init_covs"]
         raw_means = model.means_
         raw_covars = model.covars_
         weights = model.weights_
+
+        # segment_lengths, num_bps = count_breakpoints(raw_labels, X_lengths)
+        # print(f"uniq_labels={len(np.unique(raw_labels))}")
+        # print(f"#breakpoints={num_bps}")
+        # print(f"mean-segment-length={np.mean(segment_lengths):.3f}")
+        # print(f"median-segment-length={np.median(segment_lengths):.3f}")
 
         # print(X_scaler.mean_)
         # print(raw_means)
@@ -188,6 +195,8 @@ if __name__ == "__main__":
             # print(raw_means[label2k[label], :], raw_covars[label2k[label], :])
             print(raw_init_means[label2k[label], :], raw_init_covs[label2k[label], :])
             print(means[label2k[label], :], covars[label2k[label], :])
+            for k2 in range(len(labels)):
+                print("\t->", labels[k2], transmat[label2k[label], label2k[labels[k2]]].round(5))
         # compute expected RDR and BAF for each K
         expected_rdr_mean = np.zeros((len(labels), nsamples), dtype=np.float64)
         expected_rdr_std = np.zeros((len(labels), nsamples), dtype=np.float64)
@@ -200,14 +209,12 @@ if __name__ == "__main__":
             expected_rdr_std[k, :] = np.std(rdrs[label_mask, :], axis=0)
 
             baf_means = means[label2k[label], :nsamples]
-            for i in range(nsamples):
-                # decide cluster mhBAF based on average mhBAF per sample
-                if np.mean(mhbafs[label_mask, i]) > 0.5:
-                    expected_baf_mean[k, 1 + i] = max(means[label2k[label], i], 1 - means[label2k[label], i])
-                else:
-                    expected_baf_mean[k, 1 + i] = min(means[label2k[label], i], 1 - means[label2k[label], i])
-            if np.mean(np.abs(expected_baf_mean[k, 1:] - 0.5)) <= baf_tol:
+            if np.mean(np.abs(means[label2k[label], :] - 0.5)) <= baf_tol:
+                # allelic balanced cluster, set BAF=0.5
                 expected_baf_mean[k, 1:] = 0.5
+            else:
+                # MLE of BAF mean
+                expected_baf_mean[k, 1:] = np.mean(mhbafs[label_mask, 1:], axis=0)
             baf_vars = np.mean((mhbafs[label_mask, :] - expected_baf_mean[k, 1:]) ** 2, axis=0)
             expected_baf_std[k, 1:] = np.sqrt(baf_vars)
 
