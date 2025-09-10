@@ -15,16 +15,26 @@ from hmmlearn.stats import log_multivariate_normal_density
 from hmmlearn.utils import log_normalize
 
 
+def standardize_data(X: np.ndarray, bafdim=1):
+    X_ = np.copy(X)
+    X_[:, :bafdim] -= 0.5  # convert to [-0.5, 0.5]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_)
+    return scaler, X_scaled
+
+
 def make_transmat(diag, K):
     offdiag = (1 - diag) / (K - 1)
     transmat_ = np.diag([diag - offdiag] * K)
     transmat_ += offdiag
     return transmat_
 
+
 def split_X(X: np.ndarray, bafdim=1):
     bafs = X[:, :bafdim]
     rdrs = X[:, bafdim:]
     return bafs, rdrs
+
 
 def merge_X(bafs: np.ndarray, rdrs: np.ndarray):
     return np.concatenate([bafs, rdrs], axis=1)
@@ -36,30 +46,46 @@ def mirror_baf(X: np.ndarray, bafdim=1):
     mhbafs = np.where(baf_means[:, None] > 0.5, 1 - bafs, bafs)
     return merge_X(mhbafs, rdrs)
 
-def standardize_data(X: np.ndarray, bafdim=1):
-    X_ = np.copy(X)
-    X_[:, :bafdim] -= 0.5 # convert to [-0.5, 0.5]
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_)
-    return scaler, X_scaled
+
+def count_breakpoints(X_labels: np.ndarray, X_lengths: np.ndarray):
+    """
+    count number of switches, indicator for segmentation
+    """
+    segment_lengths = []
+    num_bps = 0
+    cs = np.cumsum(X_lengths)
+    for sub_X in np.split(X_labels, cs)[:-1]:
+        slen = 1
+        curr_label = sub_X[0]
+        for i in range(1, len(sub_X)):
+            if sub_X[i] == curr_label:
+                slen += 1
+            else:
+                segment_lengths.append(slen)
+                slen = 1
+                curr_label = sub_X[i]
+                num_bps += 1
+        segment_lengths.append(slen)  # last one
+
+    segment_lengths = np.array(segment_lengths)
+    return segment_lengths, num_bps
 
 
 class CONSTRAINED_GMMHMM(BaseHMM):
     """
     Constrained GMM-HMM model
     """
+
     def __init__(
         self,
         bafdim=1,
-        baf_weight=1.0,
-        rdr_weight=1.0,
         n_components=1,
         min_covar=1e-3,
         startprob_prior=1.0,
         transmat_prior=1.0,
         weights_prior=2.0,
         means_prior=[0.5, 1.0],
-        means_weight=[1e-3, 1e-3],
+        means_weight=[1e-2, 1e-2],
         covars_alpha=[1e-3, 1e-3],
         covars_beta=[1e-3, 1e-3],
         algorithm="viterbi",
@@ -87,9 +113,7 @@ class CONSTRAINED_GMMHMM(BaseHMM):
             implementation=implementation,
         )
 
-        self.bafdim = bafdim # first <bafdim> features are BAF, other features are RDR
-        self.baf_weight = baf_weight
-        self.rdr_weight = rdr_weight
+        self.bafdim = bafdim  # first <bafdim> features are BAF, other features are RDR
         self.min_covar = min_covar
         self.n_mix = 2
 
@@ -103,8 +127,8 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         self.means_weight = means_weight
 
         # inv-gamma prior
-        self.covars_alpha = covars_alpha # alpha
-        self.covars_beta = covars_beta # beta
+        self.covars_alpha = covars_alpha  # alpha
+        self.covars_beta = covars_beta  # beta
 
     # TODO better means and covariance init?
     def _init(self, X, lengths=None):
@@ -129,27 +153,21 @@ class CONSTRAINED_GMMHMM(BaseHMM):
             centroids = kmeans.cluster_centers_
             # (n_components, n_features)
             self.means_ = centroids
-        
+
         # emission covariance, diagonal (K, D)
         if self._needs_init("c", "covars_"):
-            cv = np.cov(X.T) + self.min_covar * np.eye(nf) # cov(X) + sig*I
+            cv = np.cov(X.T) + self.min_covar * np.eye(nf)  # cov(X) + sig*I
             if not cv.shape:
                 cv.shape = (1, 1)
             # (n_components, n_features)
-            self.covars_ = np.tile(np.diag(cv), (nc, 1)) 
+            self.covars_ = np.tile(np.diag(cv), (nc, 1))
         return
 
     def _get_n_fit_scalars_per_param(self):
         nc = self.n_components
         nf = self.n_features
-        return {
-            "s": nc - 1,
-            "t": nc * (nc - 1),
-            "m": nc * nf,
-            "c": nc * nf,
-            "w": nc
-        }
-    
+        return {"s": nc - 1, "t": nc * (nc - 1), "m": nc * nf, "c": nc * nf, "w": nc}
+
     def _compute_log_weighted_gaussian_densities(self, X, i_comp):
         """
         compute logP(rdr_n,baf_n|z_n=k,c_n=c) fixed k.
@@ -162,15 +180,11 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         baf_means, rdr_means = split_X(self.means_[i_comp][None, :], self.bafdim)
         baf_covs, rdr_covs = split_X(self.covars_[i_comp][None, :], self.bafdim)
 
-        rdr_lls = log_multivariate_normal_density(
-            X_rdrs, rdr_means, rdr_covs, "diag"
-        ) * self.rdr_weight
+        rdr_lls = log_multivariate_normal_density(X_rdrs, rdr_means, rdr_covs, "diag")
         baf_lls_a = log_multivariate_normal_density(
             X_bafs, 1 - baf_means, baf_covs, "diag"
-        ) * self.baf_weight
-        baf_lls_b = log_multivariate_normal_density(
-            X_bafs, baf_means, baf_covs, "diag"
-        ) * self.baf_weight
+        )
+        baf_lls_b = log_multivariate_normal_density(X_bafs, baf_means, baf_covs, "diag")
         lls = np.zeros((n_samples, self.n_mix))
         # logP(baf,rdr,c_n=0|z_n=k)
         # = logP(baf|z_n=k,c_n=0) + logP(rdr|z_n=k,c_n=0) + P(c_n=0|z_n=k)
@@ -194,7 +208,7 @@ class CONSTRAINED_GMMHMM(BaseHMM):
 
     def _initialize_sufficient_statistics(self):
         stats = super()._initialize_sufficient_statistics()
-        
+
         # gamma_n(k), sum over all observations
         stats["post_sum"] = np.zeros(self.n_components)
 
@@ -208,7 +222,6 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         stats["c_n"] = np.zeros((self.n_components, self.n_features))
 
         stats["raw_data"] = []
-
 
         return stats
 
@@ -224,7 +237,7 @@ class CONSTRAINED_GMMHMM(BaseHMM):
 
         n_samples, _ = X.shape
         bafdim = self.bafdim
-        
+
         # P(c_n=c|z_n=k, X, Y)
         post_mix = np.zeros((n_samples, self.n_components, self.n_mix))
         for k in range(self.n_components):
@@ -233,15 +246,14 @@ class CONSTRAINED_GMMHMM(BaseHMM):
             with np.errstate(under="ignore"):
                 post_mix[:, k, :] = np.exp(log_denses)
 
-
         with np.errstate(under="ignore"):
             # gamma_n(k,0) and gamma_n(k,1)
             # (n_samples, n_components, 2)
             post_comp_mix = posteriors[:, :, None] * post_mix
 
         # denominators
-        stats['post_mix_sum'] += post_comp_mix.sum(axis=0)
-        stats['post_sum'] += posteriors.sum(axis=0)
+        stats["post_mix_sum"] += post_comp_mix.sum(axis=0)
+        stats["post_sum"] += posteriors.sum(axis=0)
 
         if "m" in self.params:
             for k in range(self.n_components):
@@ -254,7 +266,7 @@ class CONSTRAINED_GMMHMM(BaseHMM):
                 for j in range(self.bafdim, self.n_features):
                     num = posteriors[:, k] * X[:, j]
                     stats["m_n"][k, j] += np.sum(num)
-        
+
         if "c" in self.params:
             stats["raw_data"].append([X, post_comp_mix, posteriors])
 
@@ -284,21 +296,21 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         # Maximizaing mixture weights per state, w_k and 1-w_k
         if "w" in self.params:
             alpha = self.weights_prior
-            w_n = stats['post_mix_sum'] + (alpha - 1)
-            w_d = (stats['post_sum'] + 2 * (alpha - 1))[:, None]
+            w_n = stats["post_mix_sum"] + (alpha - 1)
+            w_d = (stats["post_sum"] + 2 * (alpha - 1))[:, None]
             self.weights_ = w_n / w_d
 
         if "m" in self.params:
             m_n = stats["m_n"]
             m_d = stats["post_sum"][:, None]
             [baf_prior, rdr_prior] = self.means_prior
-            [baf_lambda, rdr_lambda] = self.means_weight # strength
+            [baf_lambda, rdr_lambda] = self.means_weight  # strength
 
-            m_n[:, :self.bafdim] += baf_lambda * baf_prior
-            m_n[:, self.bafdim:] += rdr_lambda * rdr_prior
-            self.means_[:, :self.bafdim] = m_n[:, :self.bafdim] / (m_d + baf_lambda)
-            self.means_[:, self.bafdim:] = m_n[:, self.bafdim:] / (m_d + rdr_lambda)
-        
+            m_n[:, : self.bafdim] += baf_lambda * baf_prior
+            m_n[:, self.bafdim :] += rdr_lambda * rdr_prior
+            self.means_[:, : self.bafdim] = m_n[:, : self.bafdim] / (m_d + baf_lambda)
+            self.means_[:, self.bafdim :] = m_n[:, self.bafdim :] / (m_d + rdr_lambda)
+
         if "c" in self.params:
             # c_n = stats["c_n"]
             c_n = np.zeros((self.n_components, self.n_features))
@@ -306,8 +318,13 @@ class CONSTRAINED_GMMHMM(BaseHMM):
                 for k in range(self.n_components):
                     # BAF features
                     for i in range(self.bafdim):
-                        num0 = post_comp_mix[:, k, 0] * (X[:, i] - (1 - self.means_[k, i])) ** 2
-                        num1 = post_comp_mix[:, k, 1] * (X[:, i] - self.means_[k, i]) ** 2
+                        num0 = (
+                            post_comp_mix[:, k, 0]
+                            * (X[:, i] - (1 - self.means_[k, i])) ** 2
+                        )
+                        num1 = (
+                            post_comp_mix[:, k, 1] * (X[:, i] - self.means_[k, i]) ** 2
+                        )
                         c_n[k, i] += np.sum(num0 + num1)
                     # RDR features
                     for j in range(self.bafdim, self.n_features):
@@ -318,10 +335,14 @@ class CONSTRAINED_GMMHMM(BaseHMM):
             # diag-covariance priors
             [baf_alpha, rdr_alpha] = self.covars_alpha
             [baf_beta, rdr_beta] = self.covars_beta
-            c_n[:, :self.bafdim] += 2 * baf_beta
-            c_n[:, self.bafdim:] += 2 * rdr_beta
-            self.covars_[:, :self.bafdim] = c_n[:, :self.bafdim] / (c_d + 2 * (baf_alpha + 1))
-            self.covars_[:, self.bafdim:] = c_n[:, self.bafdim:] / (c_d + 2 * (rdr_alpha + 1))
+            c_n[:, : self.bafdim] += 2 * baf_beta
+            c_n[:, self.bafdim :] += 2 * rdr_beta
+            self.covars_[:, : self.bafdim] = c_n[:, : self.bafdim] / (
+                c_d + 2 * (baf_alpha + 1)
+            )
+            self.covars_[:, self.bafdim :] = c_n[:, self.bafdim :] / (
+                c_d + 2 * (rdr_alpha + 1)
+            )
 
         if "t" in self.params and self.diag_transmat:
             denoms = stats["denoms"]
@@ -350,3 +371,9 @@ class CONSTRAINED_GMMHMM(BaseHMM):
         transmat_ += offdiag
         # assert np.all(transmat_ > 0), (diag, offdiag, transmat_)
         return transmat_
+
+    def decode_labels(self, X, X_lengths, A=None, decode_algo="viterbi"):
+        if not A is None:
+            self.transmat_ = A
+        decode_ll, labels = self.decode(X, X_lengths, algorithm=decode_algo)
+        return decode_ll, labels
