@@ -26,16 +26,19 @@ CHROMS=$(seq 1 22)
 gamma=0.05
 min_ad=1
 
+# mosdpeth parameters
+readquality=11
+
 # phasing parameters
 minMAPQ=20
 numThreads=8
 
 # binning parameters
 MSR=5000
-MTR=30
-READ_LENGTH=10000
-MSPB=20
-MBS=1000000 #1e6
+# MTR=30
+# READ_LENGTH=10000
+# MSPB=20
+# MBS=1000000 #1e6
 
 # general parameters
 MAXJOBS=4
@@ -137,25 +140,23 @@ else
 fi
 
 ########################################
-echo "form allele-count matrix"
+echo "filter Het-SNPs"
 date
 allele_dir="${OUTDIR}/allele"
 mkdir -p ${allele_dir}
-snp_info_file="${allele_dir}/snp_info.tsv.gz"
-if [[ ! -f ${snp_info_file} ]]; then
-    python -u ${SCRIPT_DIR}/form_snp_matrix.py \
+snp_1pos_file=${TMPDIR}/snps.1pos
+if [[ ! -f ${snp_1pos_file} ]]; then
+    python -u ${SCRIPT_DIR}/filter_snps.py \
         ${REGION_BED} \
         ${baf_dir} \
-        ${allele_dir} \
+        ${snp_1pos_file} \
         "${min_ad}" \
-        "${gamma}" \
-        ${NORMAL_BAM} ${TUMOR_BAM} &>"${LOGDIR}/form_snp_matrix.log"
+        "${gamma}" &>"${LOGDIR}/filter_snps.log"
 else
     echo "skip"
-fi
+if
 
-########################################
-echo "filter&concat Het SNPs"
+echo "concat Het-SNPs"
 date
 het_snp_file="${allele_dir}/snps.vcf.gz"
 if [[ ! -f ${het_snp_file} ]]; then
@@ -171,14 +172,14 @@ if [[ ! -f ${het_snp_file} ]]; then
         --file-list ${snp_list_file} \
         --output ${raw_concat_file}
 
-    bcftools view -T "${allele_dir}/snps.1pos" \
+    bcftools view -T ${snp_1pos_file} \
         -Oz -o ${het_snp_file} ${raw_concat_file}
 else
     echo "skip"
 fi
-        
+
 #######################################
-echo "run longphase & HapCUT2"
+echo "phase Het-SNPs"
 date
 phase_dir="${OUTDIR}/phase"
 mkdir -p ${phase_dir}
@@ -230,19 +231,37 @@ else
     echo "skip"
 fi
 
+########################################
+echo "form allele-count matrix & assign SNP bounderies & compute per-SNP aligned bases"
+date
+snp_info_file="${allele_dir}/snp_info.tsv.gz"
+if [[ ! -f ${snp_info_file} ]]; then
+    python -u ${SCRIPT_DIR}/count_reads.py \
+        ${REGION_BED} \
+        ${baf_dir} \
+        ${phase_file} \
+        ${allele_dir} \
+        ${numThreads} \
+        ${readquality} \
+        ${NORMAL_BAM} ${TUMOR_BAM} &>"${LOGDIR}/count_reads.log"
+else
+    echo "skip"
+fi
+
 # files
-# allele/sample_ids.tsv  snp_info.tsv.gz  snp_matrix.dp.npz snp_matrix.alt.npz  snp_matrix.ref.npz  snps.1pos
+# allele/sample_ids.tsv  snp_info.tsv.gz  snp_matrix.dp.npz snp_matrix.alt.npz  snp_matrix.ref.npz
 # phase/phased.vcf.gz Normal.hairs.tsv.gz Tumor.hairs.tsv.gz
 # 
 
 ########################################
-echo "run combine_counts python script"
+echo "run combine_counts"
 date
 bb_dir="${OUTDIR}/bb"
 mkdir -p ${bb_dir}
-test_file=${bb_dir}/bulk.bb
-if [[ ! -f ${test_file} ]]; then
+bb_file=${bb_dir}/bulk.bb
+if [[ ! -f ${bb_file} ]]; then
     python -u ${SCRIPT_DIR}/combine_counts.py \
+        ${REFERENCE} \
         ${allele_dir} \
         ${phase_dir} \
         ${bb_dir} \
@@ -252,12 +271,12 @@ else
 fi
 
 ########################################
-echo "run cluster_bins python script"
+echo "run cluster_bins"
 date
 bbc_dir="${OUTDIR}/bbc"
 mkdir -p ${bbc_dir}
-test_file=${bbc_dir}/bulk.bbc
-if [[ ! -f ${test_file} ]]; then
+bbc_file=${bbc_dir}/bulk.bbc
+if [[ ! -f ${bbc_file} ]]; then
     python -u ${SCRIPT_DIR}/cluster_bins.py \
         ${bb_dir} \
         ${bbc_dir}

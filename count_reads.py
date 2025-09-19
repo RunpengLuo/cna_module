@@ -1,71 +1,10 @@
 import os
 import sys
-import subprocess
-
-import pyranges as pr
 
 import numpy as np
 import pandas as pd
-from scipy.stats import beta
 
 from utils import *
-
-
-def validate_snps(pivot_snps: pd.DataFrame, regions: pd.DataFrame):
-    """
-    filter any SNP doesn't belong to valid regions
-    filter any SNP doesn't appear in all SAMPLE
-    """
-    print("exclude SNPs not in region file")
-    all_positions = pivot_snps.index.to_frame(index=False)
-    all_positions["POS0"] = all_positions["POS"] - 1
-    all_positions["End"] = all_positions["POS0"] + 1
-
-    pr_snps = pr.PyRanges(
-        all_positions.rename(columns={"#CHR": "Chromosome", "POS0": "Start"})
-    )
-    pr_regions = pr.PyRanges(
-        regions.rename(columns={"#CHR": "Chromosome", "START": "Start", "END": "End"})
-    )
-    overlapping_snps = pr_snps.overlap(pr_regions).df
-    overlapping_snps = overlapping_snps.rename(columns={"Chromosome": "#CHR"})
-    mask = (
-        pd.merge(
-            left=all_positions,
-            right=overlapping_snps,
-            on=["#CHR", "POS"],
-            how="left",
-            sort=False,
-        )["Start"]
-        .isna()
-        .to_numpy()
-    )
-    pivot_snps = pivot_snps.loc[~mask, :]
-    pivot_snps = pivot_snps.dropna(how="any")
-    print(f"#SNP after validation={len(pivot_snps)}")
-    return pivot_snps
-
-def filter_snps(snp_positions: pd.DataFrame, ref_mat: np.ndarray, alt_mat: np.ndarray, gamma: float):
-    """
-    exclude SNPs have 0 count in any of the SAMPLE
-    exclude SNPs if normal sample failed beta-posterior credible interval test.
-    """
-    print("filter SNPs")
-    snp_wl = np.ones(len(snp_positions), dtype=bool)
-    snp_wl = snp_wl & np.all((ref_mat + alt_mat) > 0, axis=1)
-
-    p_lower = gamma / 2.0
-    p_upper = 1.0 - p_lower
-    q = np.array([p_lower, p_upper])
-    het_cred_ints = beta.ppf(q[None, :], ref_mat[:, 0][:, None], alt_mat[:, 0][:, None])
-    het_incl_balanced = (het_cred_ints[:, 0] <= 0.5) & (0.5 <= het_cred_ints[:, 1])
-    snp_wl = snp_wl & het_incl_balanced
-
-    snp_positions = snp_positions.loc[snp_wl, :]
-    ref_mat = ref_mat[snp_wl, :]
-    alt_mat = alt_mat[snp_wl, :]
-    print(f"#SNP after filtering={len(snp_positions)}")
-    return snp_positions, ref_mat, alt_mat
 
 def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
     """
@@ -115,7 +54,6 @@ def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
     snp_info["Blocksize"] = snp_info["END"] - snp_info["START"]
     return snp_info
 
-
 def run_mosdepth(
     samples: list,
     bams: list,
@@ -153,15 +91,20 @@ def run_mosdepth(
         mos_files.append(mos_file)
     return mos_files
 
-
+"""
+1. Form REF/ALT matrices, (snp, sample), and sample orders
+2. Form SNP bounderies, run mosdepth
+3. Return ref_mat, alt_mat, dp_mat
+"""
 if __name__ == "__main__":
-    ##################################################
     args = sys.argv
     print(args)
-    _, sample, region_file, baf_dir, out_dir = args[:5]
-    bams = args[5:]
-    assert len(bams) == 2
-    samples = ["normal", sample]
+    _, region_file, baf_dir, vcf_file, out_dir = args[:5]
+    threads = int(args[6])
+    readquality = int(args[7])
+    bams = args[8:]
+
+    mosdepth = "mosdepth"
 
     nbaf_file = os.path.join(baf_dir, "normal.1bed")
     tbaf_file = os.path.join(baf_dir, "tumor.1bed")
@@ -171,12 +114,11 @@ if __name__ == "__main__":
     out_ref_mat = os.path.join(out_dir, "snp_matrix.ref.npz")
     out_alt_mat = os.path.join(out_dir, "snp_matrix.alt.npz")
     out_sid_file = os.path.join(out_dir, "sample_ids.tsv")
+
+    # with boundary information
     out_snp_file = os.path.join(out_dir, "snp_info.tsv.gz")
     out_bed_file = os.path.join(out_dir, "snp_positions.bed.gz")
 
-    mosdepth = "mosdepth"
-    threads = 8
-    readquality = 11
     ##################################################
     print("load arguments")
     regions = pd.read_table(
@@ -189,17 +131,31 @@ if __name__ == "__main__":
 
     normal_snps = read_baf_file(nbaf_file)
     tumor_snps = read_baf_file(tbaf_file)
+    samples = normal_snps["SAMPLE"].unique().tolist() + tumor_snps["SAMPLE"].unique().tolist()
+    print("samples=", samples)
+
     all_snps = pd.concat([normal_snps, tumor_snps], axis=0).reset_index(drop=True)
     all_snps["#CHR"] = pd.Categorical(
         all_snps["#CHR"], categories=get_ord2chr(ch="chr"), ordered=True
     )
     all_snps.sort_values(by=["#CHR", "POS"], inplace=True, ignore_index=True)
 
+    # exclude any SNPs not found in VCF file
+    # this VCF file is served as a white-list
+    wl_snps = read_VCF(vcf_file, phased=True)
+    all_snps["_order"] = range(len(all_snps))
+    all_snps = pd.merge(left=all_snps, right=wl_snps, on=["#CHR", "POS"], how="left")
+    all_snps = all_snps.sort_values("_order").drop("_order")
+
+    # filtering
+    all_snps = all_snps[~pd.isna(all_snps["GT"]), :].reset_index(drop=True)
+
     pivot_snps = all_snps.pivot(
         index=["#CHR", "POS"], columns="SAMPLE", values=["REF", "ALT"]
     )
-    print(f"#SNPs (raw)={len(pivot_snps.index)}")
-    pivot_snps = validate_snps(pivot_snps, regions)
+    num_valid_snps = len(pivot_snps.index)
+    print(f"#valid Het-SNPs={num_valid_snps}")
+    assert num_valid_snps > 0, "no valid HET SNPs after filtering"
 
     ##################################################
     # preserve sample order
@@ -214,7 +170,6 @@ if __name__ == "__main__":
     ref_mat = pivot_snps["REF"].to_numpy()[:, pivot_orders]
     alt_mat = pivot_snps["ALT"].to_numpy()[:, pivot_orders]
 
-    snp_positions, ref_mat, alt_mat = filter_snps(snp_positions, ref_mat, alt_mat, gamma=0.05) # TODO
     assert len(snp_positions) > 0, "no valid HET SNPs after filtering"
 
     np.savez_compressed(out_ref_mat, mat=ref_mat)

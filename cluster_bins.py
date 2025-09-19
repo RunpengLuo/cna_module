@@ -15,19 +15,19 @@ if __name__ == "__main__":
     _, bb_dir, out_dir = args[:3]
 
     # hyper-parameter
-    baf_tol = 0.01  # collapse to 0.5 if estimated BAF deviation within 0.5-baf_tol and 0.5+baf_tol
+    baf_tol = 0.02  # collapse to 0.5 if estimated BAF deviation within 0.5-baf_tol and 0.5+baf_tol
 
     # model-parameters
     tau = 1e-12
     minK = 2
-    maxK = 10
+    maxK = 12
     restarts = 10
     n_iter = 10
     decode_algo = "viterbi"
     verbose = 1
 
-    # "smctw" "smct"
-    hmm_params = "smc"
+    # "smctw" "smct" "smc"
+    hmm_params = "mc"
     diag_transmat = True
 
     os.makedirs(out_dir, exist_ok=True)
@@ -64,19 +64,20 @@ if __name__ == "__main__":
 
     X_in = X
     X_in_init = mirror_baf(X_in, nsamples)
-    # estimate global-BAF-variance from normal
-    normal_baf_variance = np.var(bafs[:, 0], ddof=1)
-    print(f"estimated normal BAF variance {normal_baf_variance.round(3)}")
 
     # priors
     means_prior = [0.5, 1.0]
     means_weight = [1e-2, 1e-2]
 
-    rdr_alpha = 1e-3
-    rdr_beta = 1e-3
-    baf_alpha = 5
-    prior_baf_mode = normal_baf_variance
-    baf_beta = prior_baf_mode * (baf_alpha + 1)
+    baf_alpha, baf_beta = 2.0, 0.02   # mode ~0.01, tighter variance
+    rdr_alpha, rdr_beta = 2.0, 0.3    # mode ~0.1, inflate variance
+
+    rdr_mode = rdr_beta / (rdr_alpha + 1)
+    baf_mode = baf_beta / (baf_alpha + 1)
+    covars_alpha = [baf_alpha, rdr_alpha]
+    covars_beta = [baf_beta, rdr_beta]
+    print(f"inverse-gamma covars_prior: alpha={covars_alpha}, beta={covars_beta}")
+    print(f"inverse-gamma baf-mode={baf_mode} rdr-mode={rdr_mode}")
 
     covars_alpha = [baf_alpha, rdr_alpha]
     covars_beta = [baf_beta, rdr_beta]
@@ -232,12 +233,6 @@ if __name__ == "__main__":
     bb["CLUSTER"] = 0
     # save to bulk.bbc
     for K in range(minK, maxK + 1):
-        if opt_K == K:
-            bbc_file = os.path.join(out_dir, f"bulk.bbc")
-            seg_file = os.path.join(out_dir, f"bulk.seg")
-        else:
-            bbc_file = os.path.join(bbc_dir, f"bulk{K}.bbc")
-            seg_file = os.path.join(bbc_dir, f"bulk{K}.seg")
         bb["CLUSTER"] = np.repeat(all_labels[K], nsamples)
         labels = uniq_labels[K]
         seg_rows = []
@@ -280,5 +275,15 @@ if __name__ == "__main__":
                 "RD-std",
             ],
         )
+
+        bbc_file = os.path.join(bbc_dir, f"bulk{K}.bbc")
+        seg_file = os.path.join(bbc_dir, f"bulk{K}.seg")
         bb.to_csv(bbc_file, sep="\t", header=True, index=False)
         seg.to_csv(seg_file, sep="\t", header=True, index=False)
+
+        if opt_K == K:
+            bbc_file = os.path.join(out_dir, f"bulk.bbc")
+            seg_file = os.path.join(out_dir, f"bulk.seg")
+            bb.to_csv(bbc_file, sep="\t", header=True, index=False)
+            seg.to_csv(seg_file, sep="\t", header=True, index=False)
+    sys.exit(0)

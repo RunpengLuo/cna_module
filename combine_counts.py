@@ -69,10 +69,8 @@ if __name__ == "__main__":
     ##################################################
     args = sys.argv
     print(args)
-    _, allele_dir, phase_dir, out_dir = sys.argv[:4]
-    msr = int(sys.argv[4])
-
-    ref_file = "reference/T2T-CHM13v2.0.fasta"
+    _, ref_file, allele_dir, phase_dir, out_dir = sys.argv[:5]
+    msr = int(sys.argv[6])
 
     verbose = 1
     read_type = "TGS"
@@ -80,7 +78,6 @@ if __name__ == "__main__":
     mirror_mhBAF = False
     map_BAF = True
     phase_mode = "prior"
-    # phase_mode = "hmm"
     assert phase_mode in ["prior", "em", "hmm"]
     print(f"phasing_mode={phase_mode}")
 
@@ -227,6 +224,21 @@ if __name__ == "__main__":
         left=snp_info, right=meta_info[["meta_id", "bin_id"]], on="meta_id", how="left"
     )
     snp_info["PHASE"] = 0.0
+
+    # TODO TMP save meta-SNPs information here
+    meta_info.to_csv(
+        os.path.join(out_dir, "meta_snp_info.tsv.gz"),
+        sep="\t",
+        header=True,
+        index=False,
+    )
+
+    np.savez_compressed(
+        os.path.join(out_dir, "meta_snp.ref.npz"), mat=meta_refs
+    )
+    np.savez_compressed(
+        os.path.join(out_dir, "meta_snp.alt.npz"), mat=meta_alts
+    )
 
     ##################################################
     if read_type == "TGS":
