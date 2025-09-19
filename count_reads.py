@@ -100,9 +100,9 @@ if __name__ == "__main__":
     args = sys.argv
     print(args)
     _, region_file, baf_dir, vcf_file, out_dir = args[:5]
-    threads = int(args[6])
-    readquality = int(args[7])
-    bams = args[8:]
+    threads = int(args[5])
+    readquality = int(args[6])
+    bams = args[7:]
 
     mosdepth = "mosdepth"
 

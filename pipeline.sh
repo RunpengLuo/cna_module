@@ -154,7 +154,7 @@ if [[ ! -f ${snp_1pos_file} ]]; then
         "${gamma}" &>"${LOGDIR}/filter_snps.log"
 else
     echo "skip"
-if
+fi
 
 echo "concat Het-SNPs"
 date

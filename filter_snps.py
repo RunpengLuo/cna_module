@@ -72,8 +72,8 @@ if __name__ == "__main__":
     args = sys.argv
     print(args)
     _, region_file, baf_dir, out_1pos_file = args[:4]
-    min_ad = int(args[5])
-    gamma = float(args[6])
+    min_ad = int(args[4])
+    gamma = float(args[5])
 
     nbaf_file = os.path.join(baf_dir, "normal.1bed")
     tbaf_file = os.path.join(baf_dir, "tumor.1bed")

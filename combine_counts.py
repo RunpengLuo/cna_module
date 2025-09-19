@@ -70,7 +70,7 @@ if __name__ == "__main__":
     args = sys.argv
     print(args)
     _, ref_file, allele_dir, phase_dir, out_dir = sys.argv[:5]
-    msr = int(sys.argv[6])
+    msr = int(sys.argv[5])
 
     verbose = 1
     read_type = "TGS"
