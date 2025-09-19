@@ -145,11 +145,12 @@ if __name__ == "__main__":
     wl_snps = read_VCF(vcf_file, phased=True)
     all_snps["_order"] = range(len(all_snps))
     all_snps = pd.merge(left=all_snps, right=wl_snps, on=["#CHR", "POS"], how="left")
-    all_snps = all_snps.sort_values("_order").drop(columns="_order")
+    all_snps = all_snps.sort_values("_order")
+    all_snps = all_snps.drop(columns="_order")
 
     # filtering
-    all_snps = all_snps[~pd.isna(all_snps["GT"]), :].reset_index(drop=True)
-
+    all_snps = all_snps.loc[~pd.isna(all_snps["GT"]), :]
+    all_snps = all_snps.reset_index(drop=True)
     pivot_snps = all_snps.pivot(
         index=["#CHR", "POS"], columns="SAMPLE", values=["REF", "ALT"]
     )
