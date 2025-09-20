@@ -112,7 +112,7 @@ if __name__ == "__main__":
     nsamples = len(samples)
 
     snp_info = pd.read_table(snp_ifile, sep="\t")
-    dp_mat = np.load(red_mfile)["mat"].astype(np.int32)
+    dp_mat = np.load(red_mfile)["mat"].astype(np.float32)
     ref_mat = np.load(ref_mfile)["mat"].astype(np.int32)
     alt_mat = np.load(alt_mfile)["mat"].astype(np.int32)
     tot_mat = (ref_mat + alt_mat).astype(np.int32)
@@ -134,6 +134,8 @@ if __name__ == "__main__":
 
     snp_bss = snp_info["Blocksize"].to_numpy()
     bases_mat = dp_mat * snp_bss[:, None]
+    # depth is fractional, #bases should be integer.
+    bases_mat = np.ceil(bases_mat).astype(np.int64)
     snp_pss = snp_info["PS"].to_numpy()
     snp_gts = snp_info["GT"].to_numpy().astype(np.int8)
     snp_gts2d = np.concatenate([snp_gts[:, None], snp_gts[:, None]], axis=1)

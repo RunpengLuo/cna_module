@@ -3,12 +3,12 @@
 set -euo pipefail
 
 # input
-SAMPLE=
-OUTDIR=
+SAMPLE=$1
+OUTDIR=$2
 TMPDIR=${OUTDIR}/tmp
 LOGDIR=${OUTDIR}/log
-NORMAL_BAM=
-TUMOR_BAM=
+NORMAL_BAM=$3
+TUMOR_BAM=$4
 
 
 SAMPLE_FILE=
@@ -156,6 +156,7 @@ else
     echo "skip"
 fi
 
+########################################
 echo "concat Het-SNPs"
 date
 het_snp_file="${allele_dir}/snps.vcf.gz"

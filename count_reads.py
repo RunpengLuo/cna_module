@@ -52,6 +52,7 @@ def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
                 snp_info.loc[reg_snp_indices, "END"] = reg_bounderies[1:]
     
     snp_info["Blocksize"] = snp_info["END"] - snp_info["START"]
+    print(snp_info["Blocksize"].describe().T)
     return snp_info
 
 def run_mosdepth(
@@ -135,22 +136,19 @@ if __name__ == "__main__":
     print("samples=", samples)
 
     all_snps = pd.concat([normal_snps, tumor_snps], axis=0).reset_index(drop=True)
-    all_snps["#CHR"] = pd.Categorical(
-        all_snps["#CHR"], categories=get_ord2chr(ch="chr"), ordered=True
-    )
-    all_snps.sort_values(by=["#CHR", "POS"], inplace=True, ignore_index=True)
 
     # exclude any SNPs not found in VCF file
     # this VCF file is served as a white-list
     wl_snps = read_VCF(vcf_file, phased=True)
-    all_snps["_order"] = range(len(all_snps))
     all_snps = pd.merge(left=all_snps, right=wl_snps, on=["#CHR", "POS"], how="left")
-    all_snps = all_snps.sort_values("_order")
-    all_snps = all_snps.drop(columns="_order")
+    
+    all_snps["#CHR"] = pd.Categorical(
+        all_snps["#CHR"], categories=get_ord2chr(ch="chr"), ordered=True
+        )
+    all_snps.sort_values(by=["#CHR", "POS"], inplace=True, ignore_index=True)
 
     # filtering
-    all_snps = all_snps.loc[~pd.isna(all_snps["GT"]), :]
-    all_snps = all_snps.reset_index(drop=True)
+    all_snps = all_snps.loc[~pd.isna(all_snps["GT"]), :].reset_index(drop=True)
     pivot_snps = all_snps.pivot(
         index=["#CHR", "POS"], columns="SAMPLE", values=["REF", "ALT"]
     )
@@ -212,5 +210,6 @@ if __name__ == "__main__":
         snp_info = snp_info.rename(columns={"COV": sample})
 
     dp_mat = snp_info.loc[:, samples].to_numpy()
+    assert np.all(dp_mat[:, 0] > 0), "Normal Sample has DP=0 at some bins"
     np.savez_compressed(out_dp_file, mat=dp_mat)
     sys.exit(0)
