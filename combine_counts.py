@@ -19,11 +19,9 @@ from rdr_estimation import *
 def adaptive_binning(
     snp_info: pd.DataFrame,
     tot_mat: np.ndarray,
-    site_switch_errors: np.ndarray,
     min_snp_reads=3000,
     min_total_bases=10e6,
-    switch_err_rate=0.3,  # min_site_switch_error, set to 1.0 to disable
-    ps_aware=True,  # restrict each bin within same PS block or unphased.
+    ps_aware=True,  # restrict each bin within same PS block
     colname="bin_id",
 ):
     print("adaptive binning")
@@ -47,7 +45,6 @@ def adaptive_binning(
             if (
                 np.all(acc_snp >= min_snp_reads)
                 or (ps_aware and (snp_pss[prev_idx] != snp_pss[idx]))
-                # or (site_switch_errors[idx] > switch_err_rate)
             ):
                 bin_ids[prev_start:i] = bin_id
                 bin_id += 1
@@ -209,10 +206,8 @@ if __name__ == "__main__":
     meta_info = adaptive_binning(
         meta_info,
         meta_tots,
-        meta_switch_errors,
         min_snp_reads=msr,
         min_total_bases=10e6,
-        switch_err_rate=0.3,
         ps_aware=True,
     )
     bin_ids = meta_info["bin_id"].unique()

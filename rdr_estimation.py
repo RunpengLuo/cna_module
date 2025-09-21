@@ -93,15 +93,6 @@ def compute_RDR(
             gccorr_rdr_mat[:, si] = corr_rdrs / np.mean(corr_rdrs)
         raw_rdr_mat = gccorr_rdr_mat
     rdr_mat = raw_rdr_mat
-
-    # region_ids = bin_info["region_id"].unique()
-    # reg_bins = bin_info.groupby(by="region_id", sort=False)
-    # for region_id in region_ids:
-    #     reg_bin = reg_bins.get_group(region_id)
-    #     reg_rds = rdr_mat[reg_bin.index.to_numpy(), :]
-    #     ch = reg_bin["#CHR"].iloc[0]
-    #     print(f"{ch}\tmean-RD={np.mean(reg_rds, axis=0)}\tstd-RD={np.std(reg_rds, axis=0)}")
-
     return rdr_mat
 
 def correct_gc_biases(bin_df: pd.DataFrame, rdr_mat: np.ndarray, ref_file: str):
