@@ -107,7 +107,7 @@ if __name__ == "__main__":
     # RDR
     rdr_mat = compute_RDR(
         block_ids, haplo_blocks, snp_info, bases_mat, num_blocks, ntumor_samples,
-        correct_gc=correct_gc, ref_file=ref_file, out_dir=out_dir
+        correct_gc=correct_gc, ref_file=ref_file, out_dir=out_dir, grp_id="HB"
     )
     np.savez_compressed(out_rdr_mat, mat=rdr_mat)
 
