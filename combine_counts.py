@@ -74,8 +74,10 @@ if __name__ == "__main__":
     correct_gc = True
     mirror_mhBAF = False
     map_BAF = True
-    phase_mode = "prior"
-    assert phase_mode in ["prior", "em", "hmm"]
+    # phase_mode = "prior"
+    phase_mode = "betabinom-em"
+    # phase_mode = "binom-em"
+    assert phase_mode in ["prior", "binom-em", "gaussian-em", "betabinom-em", "hmm"]
     print(f"phasing_mode={phase_mode}")
 
     # input files
@@ -149,7 +151,7 @@ if __name__ == "__main__":
     ##################################################
     # derive phase-switch errors for adjacent SNPs
     if read_type == "TGS":
-        site_switch_errors, site_switch_counts = compute_site_switch_error(
+        site_switch_errors, site_switch_counts = compute_site_switch_TGS(
             snp_cis, snp_trans, snp_hairs_total, snp_gts2d
         )
         print(f"average-site-switch-error={np.mean(site_switch_errors):.3f}")
@@ -166,7 +168,7 @@ if __name__ == "__main__":
         tot_mat,
         site_switch_errors,
         nsamples,
-        max_snps_per_block=30,
+        max_snps_per_block=10,
         max_blocksize=1e5,
         alpha=0.1,
         switch_err_rate=0.1,
@@ -190,7 +192,7 @@ if __name__ == "__main__":
         meta_cis = np.sum(meta_hairs[:, [0, 3]], axis=1)
         meta_trans = np.sum(meta_hairs[:, [1, 2]], axis=1)
         meta_hairs_total = meta_hairs.sum(axis=1).astype(np.int32)
-        meta_switch_errors, meta_switch_counts = compute_site_switch_error(
+        meta_switch_errors, meta_switch_counts = compute_site_switch_TGS(
             meta_cis, meta_trans, meta_hairs_total, meta_gts2d
         )
         # switch errors between meta-SNPs
@@ -300,7 +302,20 @@ if __name__ == "__main__":
             )
             baf_mat = potts_baf_mat
         else:  # em
-            pass
+            cov_mat, baf_mat, alpha_mat, beta_mat = compute_BAF_em(
+                bin_ids,
+                meta_info,
+                meta_refs,
+                meta_alts,
+                meta_tots,
+                nbins,
+                nsamples,
+                mirror_mhBAF=mirror_mhBAF,
+                em_method=phase_mode,
+                v=verbose,
+            )
+            np.savez_compressed(out_alpha_mat, mat=alpha_mat)
+            np.savez_compressed(out_beta_mat, mat=beta_mat)
     else:  # NGS
         pass
 

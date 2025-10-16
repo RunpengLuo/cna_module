@@ -9,6 +9,7 @@ from numba import njit
 
 from potts_segmentation_utils import *
 from baf_hmm_model_bin import *
+from phase_snps import *
 
 
 def single_binom_mle(
@@ -54,12 +55,6 @@ def compute_BAF(
     rand_phases = np.random.randint(2, size=len(snp_info))
     rand_ref_mat = np.where(rand_phases[:, None] == 0, alt_mat, ref_mat)
     rand_alt_mat = tot_mat - rand_ref_mat
-
-    # snp_gts = snp_info["GT"].to_numpy()
-    # snp_pss = snp_info["PS"].to_numpy()
-    # snp_unphased = pd.isna(snp_gts)
-    # snp_gts[pd.isna(snp_gts)] = 1
-    # snp_gts = snp_gts.astype(np.int8)
 
     # sitewise_transmat = build_sitewise_transmat(
     #     hairs, snp_gts, snp_pss, snp_unphased, log=True,
@@ -167,12 +162,9 @@ def compute_BAF_prior(
     beta_mat = np.zeros((nbins, nsamples), dtype=np.int32)
     cov_mat = np.zeros((nbins, nsamples), dtype=np.int32)
 
-    icl_mat = np.zeros((nbins, 2), dtype=np.float64)
-
     snp_bins = snp_info.groupby(by="bin_id", sort=False)
     for bi in bin_ids:
         bin_snps = snp_bins.get_group(bi)
-        bin_nsnp = len(bin_snps)
         snp_idx = bin_snps.index.to_numpy()
 
         bin_refs = ref_mat[snp_idx, :].T
@@ -184,10 +176,117 @@ def compute_BAF_prior(
         bin_tot = np.sum(bin_tots, axis=1)
         baf_mat[bi] = beta_mat[bi] / bin_tot
         cov_mat[bi] = bin_tot / bin_snps["#SNPS"].sum()
-        # ll_normal = np.sum(binom.logpmf(bin_refs[0][None, :], bin_tots[0][None, :], baf_mat[bi, 0][:, None]))
-        # ll_tumor = np.sum(binom.logpmf(bin_refs[1:], bin_tots[1:], baf_mat[bi, 1:][:, None]))
-        # icl_mat[bi, 0] = compute_ICL(ll_normal, k=1, n=bin_nsnp)
-        # icl_mat[bi, 1] = compute_ICL(ll_tumor, k=1, n=bin_nsnp)
+        if mirror_mhBAF and np.mean(baf_mat[bi, 1:]) > 0.5:
+            baf_mat[bi, 1:] = 1 - baf_mat[bi, 1:]
+            beta_mat[bi, 1:] = alpha_mat[bi, 1:]
+            alpha_mat[bi, 1:] = bin_tot[1:] - beta_mat[bi, 1:]
+    return cov_mat, baf_mat, alpha_mat, beta_mat
+
+def compute_BAF_em(
+    bin_ids: np.ndarray,
+    snp_info: pd.DataFrame,
+    ref_mat: np.ndarray,
+    alt_mat: np.ndarray,
+    tot_mat: np.ndarray,
+    nbins: int,
+    nsamples: int,
+    mirror_mhBAF=True,
+    em_method="",
+    max_omega=500,
+    v=1,
+):
+    print("compute mhBAF via prior phasing labels")
+
+    # infer over-dispersion parameter from normal-sample, per region
+    reg2omega = {}
+    snp_regs = snp_info.groupby(by="region_id", sort=False)
+    for region_id in snp_info["region_id"].unique():
+        reg_snps = snp_regs.get_group(region_id)
+        ch = reg_snps["#CHR"].iloc[0]
+        snp_idx = reg_snps.index.to_numpy()
+        meta_refs = ref_mat[snp_idx, 0]
+        meta_alts = alt_mat[snp_idx, 0]
+        (w0, ll0) = omega_mle(meta_refs, meta_alts, p=0.5, 
+                                 omega0s=None, max_omega=max_omega)
+        print(f"{ch}-{region_id} normal-w0={w0} ll={ll0}")
+        reg2omega[region_id] = w0
+
+    # outputs
+    baf_mat = np.zeros((nbins, nsamples), dtype=np.float64)
+    alpha_mat = np.zeros((nbins, nsamples), dtype=np.int32)
+    beta_mat = np.zeros((nbins, nsamples), dtype=np.int32)
+    cov_mat = np.zeros((nbins, nsamples), dtype=np.int32)
+
+    snp_bins = snp_info.groupby(by="bin_id", sort=False)
+    for bi in bin_ids:
+        bin_snps = snp_bins.get_group(bi)
+        snp_idx = bin_snps.index.to_numpy()
+
+        bin_refs = ref_mat[snp_idx, :].T
+        bin_alts = alt_mat[snp_idx, :].T
+        bin_tots = tot_mat[snp_idx, :].T
+
+        if em_method == "binom-em":
+            runs = {
+                b: binomial_em(
+                    bin_refs[1:],
+                    bin_alts[1:],
+                    b
+                )
+                for b in np.arange(0, 0.55, 0.05)
+            }
+            best_b = max(runs.keys(), key=lambda b: runs[b][-1])
+            param, phases, _ = runs[best_b]
+            baf_mat[bi, 1:] = param[0]
+
+            runs = {
+                b: binomial_em(
+                    bin_refs[0][None, :],
+                    bin_alts[0][None, :],
+                    b
+                )
+                for b in np.arange(0, 0.55, 0.05)
+            }
+            best_b = max(runs.keys(), key=lambda b: runs[b][-1])
+            param, _, _ = runs[best_b]
+            baf_mat[bi, 0] = param[0]
+        elif em_method == "betabinom-em":
+            w0 = reg2omega[bin_snps["region_id"].iloc[0]]
+            runs = {
+                b: betabinomial_em(
+                    bin_refs[1:],
+                    bin_alts[1:],
+                    b,
+                    w0
+                )
+                for b in np.arange(0, 0.60, 0.1)
+            }
+            best_b = max(runs.keys(), key=lambda b: runs[b][-1])
+            param, phases, _ = runs[best_b]
+            baf_mat[bi, 1:] = param[0]
+
+            runs = {
+                b: betabinomial_em(
+                    bin_refs[0][None, :],
+                    bin_alts[0][None, :],
+                    b,
+                    w0
+                )
+                # for b in np.arange(0, 0.55, 0.05)
+                for b in np.arange(0, 0.60, 0.1)
+            }
+            best_b = max(runs.keys(), key=lambda b: runs[b][-1])
+            param, _, _ = runs[best_b]
+            baf_mat[bi, 0] = param[0]
+        else:
+            raise ValueError(f"{em_method}")
+
+        phases_map = np.round(phases).astype(np.int8)
+        
+        bin_tot = np.sum(bin_tots, axis=1)
+        beta_mat[bi] = (bin_refs @ phases_map) + (bin_alts @ (1 - phases_map))
+        alpha_mat[bi] = bin_tot - beta_mat[bi]
+        cov_mat[bi] = bin_tot / bin_snps["#SNPS"].sum()
         if mirror_mhBAF and np.mean(baf_mat[bi, 1:]) > 0.5:
             baf_mat[bi, 1:] = 1 - baf_mat[bi, 1:]
             beta_mat[bi, 1:] = alpha_mat[bi, 1:]

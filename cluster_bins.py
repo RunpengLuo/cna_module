@@ -73,15 +73,14 @@ if __name__ == "__main__":
     rdr_alpha, rdr_beta = 2.0, 0.3    # mode ~0.1, inflate variance
 
     rdr_mode = rdr_beta / (rdr_alpha + 1)
+    rdr_mean = rdr_beta / (rdr_alpha - 1)
     baf_mode = baf_beta / (baf_alpha + 1)
+    baf_mean = baf_beta / (baf_alpha - 1)
     covars_alpha = [baf_alpha, rdr_alpha]
     covars_beta = [baf_beta, rdr_beta]
     print(f"inverse-gamma covars_prior: alpha={covars_alpha}, beta={covars_beta}")
-    print(f"inverse-gamma baf-mode={baf_mode} rdr-mode={rdr_mode}")
-
-    covars_alpha = [baf_alpha, rdr_alpha]
-    covars_beta = [baf_beta, rdr_beta]
-    print(f"inverse-gamma covars_prior: alpha={covars_alpha}, beta={covars_beta}")
+    print(f"inverse-gamma baf-mode={baf_mode} baf-mean={baf_mean}")
+    print(f"inverse-gamma rdr-mode={rdr_mode} rdr-mean={rdr_mean}")
 
     # hmm output
     all_labels = np.zeros((maxK + 1, nsegments), dtype=np.int32)

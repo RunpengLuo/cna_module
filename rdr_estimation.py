@@ -33,7 +33,8 @@ def compute_RDR(
     ntumor_samples: int,
     correct_gc=True,
     ref_file=None,
-    out_dir=None
+    out_dir=None,
+    grp_id="bin_id"
 ):
     print("compute RDR")
 
@@ -42,7 +43,7 @@ def compute_RDR(
     library_correction = total_bases_normal / total_bases_tumors
     print(f"RDR library normalization factor: {library_correction}")
 
-    snp_grp_bins = snp_info.groupby(by="bin_id", sort=False)
+    snp_grp_bins = snp_info.groupby(by=grp_id, sort=False)
     bin_bases_mat = np.zeros((nbins, 1 + ntumor_samples), dtype=np.int64)
     for bin_id in bin_ids:
         snp_bin = snp_grp_bins.get_group(bin_id)
@@ -61,7 +62,7 @@ def compute_RDR(
         gc_df = compute_gc_content(bin_info, ref_file)
         gc = gc_df["GC"].to_numpy()
 
-        # gccorr_dp_mat = np.zeros_like(bin_depth_mat, dtype=np.float64)
+        # gccorr_dp_mat = np.zeros_like(bin_depth_mat, dtype=np.float32)
         # for si in range(ntumor_samples + 1):
         #     sample_depth = bin_depth_mat[:, si]
         #     df = pd.DataFrame({"RD": sample_depth, "GC": gc})
@@ -80,7 +81,7 @@ def compute_RDR(
         #     plt.close()
         # gccorr_rdr_mat = gccorr_dp_mat[:, 1:] / gccorr_dp_mat[:, 0][:, None]
 
-        gccorr_rdr_mat = np.zeros_like(raw_rdr_mat, dtype=np.float64)
+        gccorr_rdr_mat = np.zeros_like(raw_rdr_mat, dtype=np.float32)
         for si in range(ntumor_samples):
             sample_rdr = raw_rdr_mat[:, si]
             # gc-correction via median quantile regression
@@ -111,7 +112,7 @@ def correct_gc_biases(bin_df: pd.DataFrame, rdr_mat: np.ndarray, ref_file: str):
         )[["#CHR", "START", "END", "GC"]]
     )
 
-    gccorr_rdr_mat = np.zeros_like(rdr_mat, dtype=np.float64)
+    gccorr_rdr_mat = np.zeros_like(rdr_mat, dtype=np.float32)
     gc_df["RD"] = 0.0
     gc_df["GCCORR"] = 0.0
     for si in range(rdr_mat.shape[1]):
