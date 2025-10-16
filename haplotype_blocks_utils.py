@@ -5,14 +5,16 @@ import numpy as np
 from utils import *
 
 ##################################################
-def load_genetic_map(genetic_map_file: str, mode="eagle2"):
+def load_genetic_map(genetic_map_file: str, mode="eagle2", sep=" "):
     assert mode == "eagle2"
-    genetic_map = pd.read_table(genetic_map_file, sep="\t").rename(
+    genetic_map = pd.read_table(genetic_map_file, sep=sep, index_col=None).rename(
         columns={"chr": "#CHR", 
                  "position": "POS", 
                  "COMBINED_rate(cM/Mb)": "recomb_rate",
                  "Genetic_Map(cM)": "pos_cm"}
     )
+    genetic_map["#CHR"] = genetic_map["#CHR"].astype(str)
+    genetic_map.loc[genetic_map["#CHR"] == "23", "#CHR"] = "X"
     if not genetic_map["#CHR"].str.startswith("chr").any():
         genetic_map["#CHR"] = "chr" + genetic_map["#CHR"].astype(str)
     genetic_map = sort_df_chr(genetic_map, ch="#CHR", pos="POS")
@@ -33,7 +35,7 @@ def estimate_switchprob_genetic_map(
     print("compute prior phase-switch probability from genetic map")
     genetic_map = load_genetic_map(genetic_map_file, mode="eagle2")    
     snp_info["d_morgans"] = 0.0
-    genetic_map_chrs = genetic_map.groupby(by="#CHR", sort=False)
+    genetic_map_chrs = genetic_map.groupby(by="#CHR", sort=False, observed=True)
     for ch, ch_snps in snp_info.groupby(by="#CHR", sort=False):
         ch_maps = genetic_map_chrs.get_group(ch)
         start_cms = np.interp(
@@ -53,10 +55,10 @@ def estimate_switchprob_genetic_map(
         )
 
         d_morgans_midpoint = np.zeros(len(pos_cms), dtype=np.float32)
-        d_morgans_midpoint[:-1] = pos_cms[1:] - pos_cms[:-1]
+        d_morgans_midpoint[1:] = pos_cms[1:] - pos_cms[:-1]
 
         d_morgans = np.zeros(len(pos_cms), dtype=np.float32)
-        d_morgans = start_cms[1:] - end_cms[:-1]
+        d_morgans[1:] = start_cms[1:] - end_cms[:-1]
 
         # avoid direct overlapping bins
         d_morgans[d_morgans <= 0] = d_morgans_midpoint[d_morgans <= 0]
@@ -69,11 +71,13 @@ def estimate_switchprob_genetic_map(
         d_morgans = ch_snps["d_morgans"].to_numpy()
         switchprobs = (1 - np.exp(-2 * nu * d_morgans)) / 2.0
         switchprobs = np.clip(switchprobs, a_min=min_switchprob, a_max=0.5)
-        snp_info.loc[ch_snps.index[1:], "switchprobs"] = switchprobs
+        snp_info.loc[ch_snps.index, "switchprobs"] = switchprobs
     
     switchprobs = snp_info["switchprobs"]
+    print(f"min-site-switch-error={np.min(switchprobs):.5f}")
     print(f"average-site-switch-error={np.mean(switchprobs):.5f}")
     print(f"median-site-switch-error={np.median(switchprobs):.5f}")
+    print(f"max-site-switch-error={np.max(switchprobs):.5f}")
     return snp_info
 
 def estimate_switchprob_long_read(
@@ -108,8 +112,10 @@ def estimate_switchprob_long_read(
     site_switch_errors = np.divide(site_switch_counts[:, 1], hairs, 
                                    where=hairs > 0, 
                                    out=np.ones(nsnp) * 0.5)
+    print(f"min-site-switch-error={np.min(site_switch_errors):.5f}")
     print(f"average-site-switch-error={np.mean(site_switch_errors):.5f}")
     print(f"median-site-switch-error={np.median(site_switch_errors):.5f}")
+    print(f"max-site-switch-error={np.max(site_switch_errors):.5f}")
     
     snp_info["switchprobs"] = np.clip(site_switch_errors, a_min=min_switchprob, a_max=0.5)
     return snp_info
@@ -218,13 +224,12 @@ def build_haplo_blocks(
     raw_phase = snp_info["PHASE_RAW"].to_numpy()
     raw_b_allele_mat = ref_mat * raw_phase[:, None] + alt_mat * (1 - raw_phase[:, None])
 
-    block_ids = haplo_blocks["HB"]
-    _, inverse = np.unique(block_ids, return_inverse=True)
     t_allele_mat = np.zeros((num_blocks, nsamples), dtype=np.int32)
     b_allele_mat = np.zeros((num_blocks, nsamples), dtype=np.int32)
-
-    np.add.at(t_allele_mat, inverse, tot_mat)
-    np.add.at(b_allele_mat, inverse, raw_b_allele_mat)
+    a_allele_mat = np.zeros((num_blocks, nsamples), dtype=np.int32)
+    for block_id, block_snps in snp_info.groupby(by="HB", sort=False):
+        b_allele_mat[block_id] = np.sum(raw_b_allele_mat[block_snps.index.to_numpy(), :], axis=0)
+        t_allele_mat[block_id] = np.sum(tot_mat[block_snps.index.to_numpy(), :], axis=0)
     a_allele_mat = t_allele_mat - b_allele_mat
     
     return snp_info, haplo_blocks, a_allele_mat, b_allele_mat, t_allele_mat
