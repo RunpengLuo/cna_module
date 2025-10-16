@@ -111,3 +111,10 @@ def load_hairs(hair_file: str, smoothing=True, alpha=1):
     if smoothing:
         hairs[:, :] += alpha
     return hairs
+
+
+def sort_df_chr(df: pd.DataFrame, ch="#CHR", pos="POS"):
+    chs = sort_chroms(df[ch].unique().tolist())
+    df[ch] = pd.Categorical(df[ch], categories=chs, ordered=True)
+    df.sort_values(by=[ch, pos], inplace=True, ignore_index=True)
+    return df
