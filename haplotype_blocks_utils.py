@@ -89,8 +89,7 @@ def estimate_switchprob_long_read(
     snp_gts = snp_info["GT"].to_numpy().astype(np.int8)
     snp_gts2d = np.concatenate([snp_gts[:, None], snp_gts[:, None]], axis=1)
 
-    all_hairs = np.concatenate([load_hairs(hair_file) for hair_file in hair_files])
-    hairs = np.sum(all_hairs, axis=0)
+    hairs = np.sum([load_hairs(hair_file) for hair_file in hair_files], axis=0)
     assert len(hairs) == nsnp
     hairs_total = np.sum(hairs, axis=1)
 
@@ -109,8 +108,8 @@ def estimate_switchprob_long_read(
             site_switch_counts[i, 0] = snp_trans[i]
             site_switch_counts[i, 1] = snp_cis[i]
     
-    site_switch_errors = np.divide(site_switch_counts[:, 1], hairs, 
-                                   where=hairs > 0, 
+    site_switch_errors = np.divide(site_switch_counts[:, 1], hairs_total, 
+                                   where=hairs_total > 0, 
                                    out=np.ones(nsnp) * 0.5)
     print(f"min-site-switch-error={np.min(site_switch_errors):.5f}")
     print(f"average-site-switch-error={np.mean(site_switch_errors):.5f}")

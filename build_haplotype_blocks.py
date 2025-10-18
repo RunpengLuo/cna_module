@@ -8,8 +8,6 @@ from hatchet_parser import parse_arguments_build_haplotype_blocks
 
 from utils import *
 from rdr_estimation import *
-from plot_utils import plot_1d2d
-
 from haplotype_blocks_utils import *
 
 """
@@ -46,6 +44,7 @@ if __name__ == "__main__":
     
     # output files
     os.makedirs(out_dir, exist_ok=True)
+    out_bb_file = os.path.join(out_dir, "bulk.bb") # TODO remove later
     out_block_file = os.path.join(out_dir, "block_info.tsv.gz")
     out_rdr_mat = os.path.join(out_dir, "block_matrix.rdr.npz")
     out_alpha_mat = os.path.join(out_dir, "block_matrix.alpha.npz")
@@ -81,6 +80,7 @@ if __name__ == "__main__":
     # derive phase-switch errors for adjacent SNPs
     # site-switch error is #reads supporting switched haplotype relative to phased haplotype
     if read_type == "TGS":
+        # TODO also add PS information here
         snp_info = estimate_switchprob_long_read(snp_info, [nhair_file, thair_file])
     else:
         snp_info = estimate_switchprob_genetic_map(snp_info, gmap_file, nu=1)
@@ -98,6 +98,9 @@ if __name__ == "__main__":
     block_ids = haplo_blocks["HB"].to_numpy()
     num_blocks = len(block_ids)
 
+    baf_mat = b_allele_mat / t_allele_mat
+    cov_mat = t_allele_mat / haplo_blocks["#SNPS"].to_numpy()[:, None]
+
     haplo_blocks.to_csv(out_block_file, sep="\t", header=True, index=False)
     np.savez_compressed(out_alpha_mat, mat=a_allele_mat)
     np.savez_compressed(out_beta_mat, mat=b_allele_mat)
@@ -113,3 +116,27 @@ if __name__ == "__main__":
 
     ##################################################
     # plot here TODO
+
+    ##################################################
+    # bb file
+    bb_df = pd.DataFrame(
+        {
+            "#CHR": np.repeat(haplo_blocks["#CHR"], ntumor_samples),
+            "START": np.repeat(haplo_blocks["START"], ntumor_samples),
+            "END": np.repeat(haplo_blocks["END"], ntumor_samples),
+            "SAMPLE": np.tile(tumor_samples, num_blocks),
+            "#SNPS": np.repeat(haplo_blocks["#SNPS"], ntumor_samples),
+        }
+    )
+
+    feature_mats = [
+        cov_mat[:, 1:],
+        baf_mat[:, 1:],
+        rdr_mat,
+    ]
+
+    feature_names = ["COV", "BAF", "RD"]
+    for name, mat in zip(feature_names, feature_mats):
+        bb_df[name] = mat.flatten()
+    
+    bb_df.to_csv(out_bb_file, sep="\t", header=True, index=False)

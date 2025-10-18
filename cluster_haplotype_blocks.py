@@ -1,5 +1,8 @@
 import os
 import sys
+import shutil
+from pathlib import Path
+
 from collections import Counter
 import kneed
 import numpy as np
@@ -24,20 +27,29 @@ if __name__ == "__main__":
     work_dir = args["work_dir"]
     out_dir = os.path.join(work_dir, args["out_dir"])
 
+    # baf_tol = 0.02  # collapse to 0.5 if estimated BAF deviation within 0.5-baf_tol and 0.5+baf_tol
+
     diag_t = args["t"]
     minK = args["minK"]
     maxK = args["maxK"]
     restarts = args["restarts"]
     n_iter = args["niters"]
     verbose = True
+    init_method="gmm"
+    decode_method="map"
+    score_method="bic"
 
     # input files
     block_dir = os.path.join(work_dir, args["block_dir"])
+    bb_file = os.path.join(block_dir, "bulk.bb")
     block_file = os.path.join(block_dir, "block_info.tsv.gz")
     rdr_mfile = os.path.join(block_dir, "block_matrix.rdr.npz")
     a_mfile = os.path.join(block_dir, "block_matrix.alpha.npz")
     b_mfile = os.path.join(block_dir, "block_matrix.beta.npz")
     t_mfile = os.path.join(block_dir, "block_matrix.total.npz")
+
+    genome_file = args["genome_file"]
+    genome_file = "./reference/GRCh38.sizes"
 
     # output files
     os.makedirs(out_dir, exist_ok=True)
@@ -64,7 +76,7 @@ if __name__ == "__main__":
     tau = estimate_overdispersion(alphas[:, 0], betas[:, 0])
     use_binom = tau is None
     print(f"estimated tau={tau}, use binom={use_binom}")
-    
+
     # divide into chromosome segments
     X_lengths = blocks.groupby(by="region_id", sort=False).agg("size").to_numpy()
     _nsegments = np.sum(X_lengths)
@@ -76,7 +88,7 @@ if __name__ == "__main__":
     X_alphas = alphas[:, 1:]
     X_betas = betas[:, 1:]
     X_totals = totals[:, 1:]
-    if X_rdrs.ndim == 1: # only one tumor sample
+    if X_rdrs.ndim == 1:  # only one tumor sample
         X_rdrs = X_rdrs[:, np.newaxis]
         X_alphas = X_alphas[:, np.newaxis]
         X_betas = X_betas[:, np.newaxis]
@@ -93,6 +105,12 @@ if __name__ == "__main__":
     log_switchprobs = np.log(switchprobs)
     log_stayprobs = np.log(1 - switchprobs)
 
+    ##################################################
+    bb = pd.read_csv(bb_file, sep="\t")
+    samples = bb["SAMPLE"].unique()
+    model_scores = []
+    # blocks["CLUSTER"] = 0
+    bb["CLUSTER"] = 0
     for K in range(minK, maxK + 1):
         print("==================================================")
         print(f"running HMM on K={K}")
@@ -100,46 +118,56 @@ if __name__ == "__main__":
         best_model = {"model_ll": -np.inf}
         for s in range(restarts):
             curr_model = run_hmm(
-                X_rdrs, X_alphas, X_betas,
-                X_totals, X_inits, X_lengths,
-                log_switchprobs, log_stayprobs,
-                log_transmat, K, tau,
-                n_iter, random_state=s,
+                X_rdrs,
+                X_alphas,
+                X_betas,
+                X_totals,
+                X_inits,
+                X_lengths,
+                log_switchprobs,
+                log_stayprobs,
+                log_transmat,
+                K,
+                tau,
+                n_iter,
+                random_state=s,
+                init_method=init_method,
+                decode_method=decode_method,
+                score_method=score_method
             )
             model_ll = curr_model["model_ll"]
             print(f"restart={s}, model loglik={model_ll: .6f}")
             if model_ll > best_model["model_ll"]:
                 best_model = curr_model
-        
-        raw_cluster_labels = best_model["cluster_labels"]
+
+        ##################################################
         # map to rank labels to avoid cluster label gaps
+        raw_cluster_labels = best_model["cluster_labels"]
         _, inv = np.unique(raw_cluster_labels, return_inverse=True)
         cluster_labels = inv + 1
+        best_model["cluster_labels"] = cluster_labels
+        unique_labels = np.unique(cluster_labels)
 
-        # cluster_labels = np.argsort(np.argsort(raw_cluster_labels)) + 1
-
-        # phase_labels = best_model["phase_labels"]
+        phase_labels = best_model["phase_labels"]
         elbo_trace = best_model["elbo_trace"]
-        num_clusters = len(np.unique(cluster_labels))
 
         # (#cluster, #samples)
         expected_rdr_mean = best_model["RDR_means"]
         expected_rdr_var = best_model["RDR_vars"]
         expected_baf_mean = best_model["BAF_means"]
 
-        # expected_rdr_mean = np.zeros((len(num_clusters), nsamples), dtype=np.float64)
-        # expected_rdr_var = np.zeros((len(num_clusters), nsamples), dtype=np.float64)
-        # expected_baf_mean = np.zeros((len(num_clusters), nsamples), dtype=np.float64)
+        X_betas_phased = (
+            X_alphas * (1 - phase_labels[:, None]) + X_betas * phase_labels[:, None]
+        )
+        phased_bafs = X_betas_phased / X_totals
+        # manually merge clusters? TODO
 
-        # for cluster_id in range(1, num_clusters + 1):
-        #     cluster_mask = cluster_labels == cluster_id
-        #     expected_rdr_mean[cluster_id, :] = np.mean(rdrs[cluster_mask, :], axis=0)
-        #     expected_rdr_var[cluster_id, :] = np.var(rdrs[cluster_mask, :], axis=0)
+        model_scores.append(best_model["model_score"])
 
-        genome_file = "./reference/T2T-CHM13v2.0.sizes"
+        ##################################################
         plot_1d2d(
             blocks,
-            X_bafs,
+            phased_bafs,
             X_rdrs,
             cluster_labels,
             expected_rdr_mean,
@@ -147,5 +175,70 @@ if __name__ == "__main__":
             genome_file,
             plot_dir,
             out_prefix=f"K{K}_",
-            plot_mirror_baf=True
+            plot_mirror_baf=True,
         )
+
+        ##################################################
+        # save to bbc and block TODO remove this later!
+        # blocks["CLUSTER"] = cluster_labels
+        bb["CLUSTER"] = np.repeat(cluster_labels, nsamples)
+        bb_grps = bb.groupby(by="CLUSTER", sort=False)
+        seg_rows = []
+        for l, label in enumerate(cluster_labels):
+            bb_grp = bb_grps.get_group(label)
+            for s, sample in enumerate(samples):
+                bb_sample = bb_grp.loc[bb_grp["SAMPLE"] == sample, :]
+                seg_nsnps = bb_sample["#SNPS"].sum()
+                ave_cov = (
+                    np.sum(bb_sample["COV"].to_numpy() * bb_sample["#SNPS"].to_numpy())
+                    / seg_nsnps
+                )
+                seg_rows.append(
+                    [
+                        label,
+                        sample,
+                        len(bb_sample),
+                        bb_sample["#SNPS"].sum(),
+                        ave_cov,
+                        expected_baf_mean[l, s],
+                        expected_rdr_mean[l, s],
+                        expected_rdr_var[l, s],
+                    ]
+                )
+        seg = pd.DataFrame(
+            data=seg_rows,
+            columns=[
+                "#ID",
+                "SAMPLE",
+                "#BINS",
+                "#SNPS",
+                "COV",
+                "BAF",
+                "RD",
+                "RD-var",
+            ],
+        )
+
+        bbc_file = os.path.join(bbc_dir, f"bulk{K}.bbc")
+        seg_file = os.path.join(bbc_dir, f"bulk{K}.seg")
+        bb.to_csv(bbc_file, sep="\t", header=True, index=False)
+        seg.to_csv(seg_file, sep="\t", header=True, index=False)
+    
+    if score_method == "bic":
+        opt_K = minK + np.argmin(model_scores)
+    else:
+        raise ValueError()
+    
+    scores_df = pd.DataFrame(data={"K": list(range(minK, maxK + 1)), score_method: model_scores})
+    scores_df.to_csv(os.path.join(out_dir, "model_scores.tsv"), sep="\t", header=True, index=False)
+
+    print("Optimal K:", opt_K)
+    
+    shutil.copy2(
+        Path(os.path.join(bbc_dir, f"bulk{opt_K}.bbc")),
+        Path(os.path.join(bbc_dir, f"bulk.bbc")),
+    )
+    shutil.copy2(
+        Path(os.path.join(bbc_dir, f"bulk{opt_K}.seg")),
+        Path(os.path.join(bbc_dir, f"bulk.seg")),
+    )

@@ -1,6 +1,7 @@
 import gzip
 import subprocess
 from io import StringIO
+from collections import OrderedDict
 
 import pandas as pd
 import numpy as np
@@ -118,3 +119,12 @@ def sort_df_chr(df: pd.DataFrame, ch="#CHR", pos="POS"):
     df[ch] = pd.Categorical(df[ch], categories=chs, ordered=True)
     df.sort_values(by=[ch, pos], inplace=True, ignore_index=True)
     return df
+
+def get_chr_sizes(sz_file: str):
+    chr_sizes = OrderedDict()
+    with open(sz_file, "r") as rfd:
+        for line in rfd.readlines():
+            ch, sizes = line.strip().split()
+            chr_sizes[ch] = int(sizes)
+        rfd.close()
+    return chr_sizes
