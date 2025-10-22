@@ -49,7 +49,7 @@ if __name__ == "__main__":
     t_mfile = os.path.join(block_dir, "block_matrix.total.npz")
 
     genome_file = args["genome_file"]
-    genome_file = "./reference/GRCh38.sizes"
+    # genome_file = "./reference/GRCh38.sizes"
 
     # output files
     os.makedirs(out_dir, exist_ok=True)
@@ -184,7 +184,7 @@ if __name__ == "__main__":
         bb["CLUSTER"] = np.repeat(cluster_labels, nsamples)
         bb_grps = bb.groupby(by="CLUSTER", sort=False)
         seg_rows = []
-        for l, label in enumerate(cluster_labels):
+        for l, label in enumerate(unique_labels):
             bb_grp = bb_grps.get_group(label)
             for s, sample in enumerate(samples):
                 bb_sample = bb_grp.loc[bb_grp["SAMPLE"] == sample, :]

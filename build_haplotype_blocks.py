@@ -41,10 +41,10 @@ if __name__ == "__main__":
     if read_type == "TGS":
         nhair_file = os.path.join(phase_dir, "Normal.hairs.tsv.gz")
         thair_file = os.path.join(phase_dir, "Tumor.hairs.tsv.gz")
-    
+
     # output files
     os.makedirs(out_dir, exist_ok=True)
-    out_bb_file = os.path.join(out_dir, "bulk.bb") # TODO remove later
+    out_bb_file = os.path.join(out_dir, "bulk.bb")  # TODO remove later
     out_block_file = os.path.join(out_dir, "block_info.tsv.gz")
     out_rdr_mat = os.path.join(out_dir, "block_matrix.rdr.npz")
     out_alpha_mat = os.path.join(out_dir, "block_matrix.alpha.npz")
@@ -64,8 +64,12 @@ if __name__ == "__main__":
     tot_mat = (ref_mat + alt_mat).astype(np.int32)
 
     phased_vcf = read_VCF(phase_file, phased=True)
-    snp_info = pd.merge(left=snp_info, right=phased_vcf, on=["#CHR", "POS"], how="left", sort=False)
-    assert np.all(~pd.isna(snp_info["GT"])), "invalid input, only phased SNPs should present here"
+    snp_info = pd.merge(
+        left=snp_info, right=phased_vcf, on=["#CHR", "POS"], how="left", sort=False
+    )
+    assert np.all(~pd.isna(snp_info["GT"])), (
+        "invalid input, only phased SNPs should present here"
+    )
     snp_info["PHASE_RAW"] = snp_info["GT"].astype(np.float32)
     num_snps = len(snp_info)
     print(f"#SNPs={num_snps}")
@@ -85,15 +89,17 @@ if __name__ == "__main__":
     else:
         snp_info = estimate_switchprob_genetic_map(snp_info, gmap_file, nu=1)
 
-    snp_info, haplo_blocks, a_allele_mat, b_allele_mat, t_allele_mat = build_haplo_blocks(
-        snp_info,
-        ref_mat,
-        alt_mat,
-        tot_mat,
-        nsamples,
-        max_snps_per_block,
-        max_switch_error,
-        colname="HB"
+    snp_info, haplo_blocks, a_allele_mat, b_allele_mat, t_allele_mat = (
+        build_haplo_blocks(
+            snp_info,
+            ref_mat,
+            alt_mat,
+            tot_mat,
+            nsamples,
+            max_snps_per_block,
+            max_switch_error,
+            colname="HB",
+        )
     )
     block_ids = haplo_blocks["HB"].to_numpy()
     num_blocks = len(block_ids)
@@ -101,7 +107,24 @@ if __name__ == "__main__":
     baf_mat = b_allele_mat / t_allele_mat
     cov_mat = t_allele_mat / haplo_blocks["#SNPS"].to_numpy()[:, None]
 
-    haplo_blocks.to_csv(out_block_file, sep="\t", header=True, index=False)
+    haplo_blocks.to_csv(
+        out_block_file,
+        sep="\t",
+        header=True,
+        index=False,
+        columns=[
+            "HB",
+            "region_id",
+            "#CHR",
+            "START",
+            "END",
+            "BLOCKSIZE",
+            "#SNPS",
+            "PS",
+            "switchprobs",
+        ],
+    )
+
     np.savez_compressed(out_alpha_mat, mat=a_allele_mat)
     np.savez_compressed(out_beta_mat, mat=b_allele_mat)
     np.savez_compressed(out_total_mat, mat=t_allele_mat)
@@ -109,8 +132,16 @@ if __name__ == "__main__":
     ##################################################
     # RDR
     rdr_mat = compute_RDR(
-        block_ids, haplo_blocks, snp_info, bases_mat, num_blocks, ntumor_samples,
-        correct_gc=correct_gc, ref_file=ref_file, out_dir=out_dir, grp_id="HB"
+        block_ids,
+        haplo_blocks,
+        snp_info,
+        bases_mat,
+        num_blocks,
+        ntumor_samples,
+        correct_gc=correct_gc,
+        ref_file=ref_file,
+        out_dir=out_dir,
+        grp_id="HB",
     )
     np.savez_compressed(out_rdr_mat, mat=rdr_mat)
 
@@ -138,5 +169,5 @@ if __name__ == "__main__":
     feature_names = ["COV", "BAF", "RD"]
     for name, mat in zip(feature_names, feature_mats):
         bb_df[name] = mat.flatten()
-    
+
     bb_df.to_csv(out_bb_file, sep="\t", header=True, index=False)
