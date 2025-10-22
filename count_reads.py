@@ -51,8 +51,8 @@ def assign_snp_bounderies(snp_positions: pd.DataFrame, regions: pd.DataFrame):
                 snp_info.loc[reg_snp_indices, "START"] = reg_bounderies[:-1]
                 snp_info.loc[reg_snp_indices, "END"] = reg_bounderies[1:]
     
-    snp_info["Blocksize"] = snp_info["END"] - snp_info["START"]
-    print(snp_info["Blocksize"].describe().T)
+    snp_info["BLOCKSIZE"] = snp_info["END"] - snp_info["START"]
+    print(snp_info["BLOCKSIZE"].describe().T)
     return snp_info
 
 def run_mosdepth(
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         sep="\t",
         header=True,
         index=False,
-        columns=["#CHR", "START", "END", "POS", "Blocksize", "region_id"],
+        columns=["#CHR", "START", "END", "POS", "BLOCKSIZE", "region_id"],
     )
     snp_info.to_csv(
         out_bed_file,
