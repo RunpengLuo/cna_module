@@ -49,7 +49,6 @@ if __name__ == "__main__":
     t_mfile = os.path.join(block_dir, "block_matrix.total.npz")
 
     genome_file = args["genome_file"]
-    # genome_file = "./reference/GRCh38.sizes"
 
     # output files
     os.makedirs(out_dir, exist_ok=True)
@@ -72,8 +71,7 @@ if __name__ == "__main__":
     print("prepare HMM inputs")
 
     # estimate over-dispersion parameter from normal sample
-    init_taus = np.arange(10, 100, 10)
-    tau = estimate_overdispersion(alphas[:, 0], betas[:, 0])
+    tau = estimate_overdispersion(alphas[:, 0], betas[:, 0], max_tau=500)
     use_binom = tau is None
     print(f"estimated tau={tau}, use binom={use_binom}")
 
@@ -96,9 +94,7 @@ if __name__ == "__main__":
 
     # used for init p
     X_bafs = X_betas / X_totals
-    baf_means = np.mean(X_bafs, axis=1)
-    X_mhbafs = np.where(baf_means[:, None] > 0.5, 1 - X_bafs, X_bafs)
-    X_inits = np.concatenate([X_rdrs, X_mhbafs], axis=1)
+    X_inits = np.concatenate([X_rdrs, X_bafs], axis=1)
 
     # transition matrix - phasing, (N, )
     switchprobs = blocks["switchprobs"].to_numpy()
@@ -162,6 +158,11 @@ if __name__ == "__main__":
         phased_bafs = X_betas_phased / X_totals
         # manually merge clusters? TODO
 
+        # TODO
+        switch_probs_ = blocks.loc[blocks["#CHR"] == "chr2"]
+
+
+
         model_scores.append(best_model["model_score"])
 
         ##################################################
@@ -175,7 +176,7 @@ if __name__ == "__main__":
             genome_file,
             plot_dir,
             out_prefix=f"K{K}_",
-            plot_mirror_baf=True,
+            plot_mirror_baf=False,
         )
 
         ##################################################

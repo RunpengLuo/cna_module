@@ -39,6 +39,12 @@ def parse_arguments_build_haplotype_blocks(args=None):
         help="reference genome FASTA file",
     )
     parser.add_argument(
+        "--genome_file",
+        required=False,
+        type=str,
+        help="reference genome size file",
+    )
+    parser.add_argument(
         "--genetic_map",
         required=False,
         type=str,
@@ -48,19 +54,34 @@ def parse_arguments_build_haplotype_blocks(args=None):
     ##################################################
     # Parameters
     parser.add_argument(
+        "--msr",
+        required=False,
+        default=200,
+        type=int,
+        help="min-snp-covering-reads", # controls per-block BAF confidence SE=sqrt(p(1-p)/msr)
+    )
+    parser.add_argument(
         "--mspb",
         required=False,
         default=10,
         type=int,
-        help="max-snps-per-block",
+        help="min-snp-per-block", # control num.samples per block, avoid alignment issues for short-reads
     )
     parser.add_argument(
         "--mserr",
         required=False,
         default=0.1,
         type=float,
-        help="max-switch-error-rate",
+        help="max-switch-error-rate", # divide phaseset if not long read
     )
+    parser.add_argument(
+        "--mbs",
+        required=False,
+        default=int(1e6),
+        type=float,
+        help="max-block-size", # controls 
+    )
+
     parser.add_argument(
         "--no_gc_correct",
         action="store_true",
@@ -118,7 +139,7 @@ def parse_arguments_cluster_blocks(args=None):
     parser.add_argument(
         "-t",
         required=False,
-        default=1e-5,
+        default=1e-12,
         type=float,
         help="off-diagonal transition",
     )

@@ -80,75 +80,6 @@ def estimate_switchprob_genetic_map(
     print(f"max-site-switch-error={np.max(switchprobs):.5f}")
     return snp_info
 
-def estimate_switchprob_long_read(
-    snp_info: pd.DataFrame,
-    hair_files: list,
-    min_switchprob=1e-6
-):
-    nsnp = len(snp_info)
-    snp_gts = snp_info["GT"].to_numpy().astype(np.int8)
-    snp_gts2d = np.concatenate([snp_gts[:, None], snp_gts[:, None]], axis=1)
-
-    hairs = np.sum([load_hairs(hair_file) for hair_file in hair_files], axis=0)
-    assert len(hairs) == nsnp
-    hairs_total = np.sum(hairs, axis=1)
-
-    snp_cis = np.sum(hairs[:, [0, 3]], axis=1)  # 00 11
-    snp_trans = np.sum(hairs[:, [1, 2]], axis=1)  # 01 10
-
-    site_switch_counts = np.zeros((nsnp, 2), dtype=np.int32)
-    for i in range(1, nsnp):
-        if hairs_total[i] == 0:
-            continue
-        gt0, gt1 = snp_gts2d[i - 1, 1], snp_gts2d[i, 0]
-        if gt0 == gt1:
-            site_switch_counts[i, 0] = snp_cis[i]
-            site_switch_counts[i, 1] = snp_trans[i]
-        else:
-            site_switch_counts[i, 0] = snp_trans[i]
-            site_switch_counts[i, 1] = snp_cis[i]
-    
-    site_switch_errors = np.divide(site_switch_counts[:, 1], hairs_total, 
-                                   where=hairs_total > 0, 
-                                   out=np.ones(nsnp) * 0.5)
-    print(f"min-site-switch-error={np.min(site_switch_errors):.5f}")
-    print(f"average-site-switch-error={np.mean(site_switch_errors):.5f}")
-    print(f"median-site-switch-error={np.median(site_switch_errors):.5f}")
-    print(f"max-site-switch-error={np.max(site_switch_errors):.5f}")
-    
-    snp_info["switchprobs"] = np.clip(site_switch_errors, a_min=min_switchprob, a_max=0.5)
-    return snp_info
-
-# def compute_site_switch_TGS(
-#     snp_cis: np.ndarray, 
-#     snp_trans: np.ndarray, 
-#     snp_tots: np.ndarray, 
-#     snp_gts2d: np.ndarray,
-# ):
-#     """
-#     snp_gts2d[:,0] indicates left-GT for SNP or Meta-SNP
-#     Output:
-#     1. site_switch_counts, col1=#reads supporting current phase, and col2=#reads supporting switched phase.
-#     2. site_switch_errors: sse[i] denotes the switch error or switch probability for site i-1 and i.
-#     """
-#     nsnp = len(snp_gts2d)
-#     site_switch_counts = np.zeros((nsnp, 2), dtype=np.int32)
-#     for i in range(1, nsnp):
-#         if snp_tots[i] == 0:
-#             continue
-#         gt0, gt1 = snp_gts2d[i - 1, 1], snp_gts2d[i, 0]
-#         if gt0 == gt1:
-#             site_switch_counts[i, 0] = snp_cis[i]
-#             site_switch_counts[i, 1] = snp_trans[i]
-#         else:
-#             site_switch_counts[i, 0] = snp_trans[i]
-#             site_switch_counts[i, 1] = snp_cis[i]
-    
-#     site_switch_errors = np.divide(site_switch_counts[:, 1], snp_tots, 
-#                                    where=snp_tots > 0, 
-#                                    out=np.ones(nsnp) * 0.5)
-#     return site_switch_errors, site_switch_counts
-
 ##################################################
 def build_haplo_blocks(
     snp_info: pd.DataFrame,
@@ -156,10 +87,14 @@ def build_haplo_blocks(
     alt_mat: np.ndarray,
     tot_mat: np.ndarray,
     nsamples: int,
-    max_snps_per_block=10,
-    max_switch_err_rate=0.10,
+    min_snp_covering_reads=200,
+    min_snp_per_block=10,
     colname="HB"
 ):
+    """
+    adaptive binning per phaseset, if a block fails MSR condition, 
+    it will be absorbed by adjacent blocks, and its SNP info is ignored.
+    """
     # haplotype block id
     hb_id = 0
     snp_info[colname] = 0
@@ -176,20 +111,23 @@ def build_haplo_blocks(
 
             hb_id0 = hb_id
             prev_start = 0
-            prev_num_snps = 1
+            acc_read_count = tot_mat[ps_snps_index[0], 1:].copy() # tumor sample only
+            acc_num_snp = 1
             for i in range(1, nfeatures):
                 idx = ps_snps_index[i]
-                if (
-                    prev_num_snps < max_snps_per_block
-                    and snp_info.loc[idx, "switchprobs"] < max_switch_err_rate
-                ):
-                    # extend feature block
-                    prev_num_snps += 1
-                else:
+                if (np.all(acc_read_count >= min_snp_covering_reads) 
+                    and acc_num_snp >= min_snp_per_block):
                     hb_ids[prev_start:i] = hb_id
                     hb_id += 1
                     prev_start = i
-                    prev_num_snps = 1
+
+                    acc_read_count = tot_mat[idx, 1:].copy()
+                    acc_num_snp= 1
+                else:
+                    # extend feature block
+                    acc_read_count += tot_mat[idx, 1:]
+                    acc_num_snp += 1
+
             # fill last block if any
             hb_ids[prev_start:] = max(hb_id - 1, hb_id0)
             snp_info.loc[ps_snps_index, colname] = hb_ids
@@ -198,7 +136,7 @@ def build_haplo_blocks(
             # we do it here in this case
             hb_id = max(hb_id, hb_id0 + 1)
     
-    haplo_snps_blocks = snp_info.groupby(by="HB", sort=False, as_index=True)
+    haplo_snps_blocks = snp_info.groupby(by=colname, sort=False, as_index=True)
     haplo_blocks = haplo_snps_blocks.agg(
         **{
             "#CHR": ("#CHR", "first"),
@@ -211,24 +149,67 @@ def build_haplo_blocks(
     )
     haplo_blocks.loc[:, "#SNPS"] = haplo_snps_blocks.size().reset_index(drop=True)
     haplo_blocks.loc[:, "BLOCKSIZE"] = haplo_blocks["END"] - haplo_blocks["START"]
-    haplo_blocks["HB"] = haplo_blocks.index
-
-    num_blocks = len(haplo_blocks)
-    print(f"#haplotype-blocks={num_blocks}")
-    print(f"min #SNPS: ", np.min(haplo_blocks["#SNPS"]))
-    print(f"max #SNPS: ", np.max(haplo_blocks["#SNPS"]))
-    print(f"median #SNPs per block: ", np.median(haplo_blocks["#SNPS"]))
-    print(f"median blocksize: ", np.median(haplo_blocks["BLOCKSIZE"]))
+    haplo_blocks[colname] = haplo_blocks.index
 
     raw_phase = snp_info["PHASE_RAW"].to_numpy()
     raw_b_allele_mat = ref_mat * raw_phase[:, None] + alt_mat * (1 - raw_phase[:, None])
 
+    num_blocks = len(haplo_blocks)
     t_allele_mat = np.zeros((num_blocks, nsamples), dtype=np.int32)
     b_allele_mat = np.zeros((num_blocks, nsamples), dtype=np.int32)
     a_allele_mat = np.zeros((num_blocks, nsamples), dtype=np.int32)
-    for block_id, block_snps in snp_info.groupby(by="HB", sort=False):
+    for block_id, block_snps in snp_info.groupby(by=colname, sort=False):
         b_allele_mat[block_id] = np.sum(raw_b_allele_mat[block_snps.index.to_numpy(), :], axis=0)
         t_allele_mat[block_id] = np.sum(tot_mat[block_snps.index.to_numpy(), :], axis=0)
     a_allele_mat = t_allele_mat - b_allele_mat
-    
-    return snp_info, haplo_blocks, a_allele_mat, b_allele_mat, t_allele_mat
+
+    print(f"#haplotype-blocks={num_blocks}")
+    print(f"min #SNPs per block: ", np.min(haplo_blocks["#SNPS"]))
+    print(f"median #SNPs per block: ", np.median(haplo_blocks["#SNPS"]))
+    print(f"max #SNPs per block: ", np.max(haplo_blocks["#SNPS"]))
+    print(f"min #SNP-covering-reads: ", np.min(t_allele_mat, axis=0))
+    print(f"median #SNP-covering-reads: ", np.median(t_allele_mat, axis=0))
+    print(f"max #SNP-covering-reads: ", np.max(t_allele_mat, axis=0))
+    print(f"median blocksize: ", np.median(haplo_blocks["BLOCKSIZE"]))
+
+    hb_below_msr = np.any(t_allele_mat[:, 1:] < min_snp_covering_reads, axis=1)
+    print(f"#blocks failed MSR condition: {np.sum(hb_below_msr)}, {np.sum(hb_below_msr)/num_blocks:.3%}")
+
+    # filter MSR failed blocks
+    haplo_blocks_pass: pd.DataFrame = haplo_blocks.loc[~hb_below_msr, :].copy(deep=True)
+    t_allele_mat = t_allele_mat[~hb_below_msr]
+    a_allele_mat = a_allele_mat[~hb_below_msr]
+    b_allele_mat = b_allele_mat[~hb_below_msr]
+
+    # absorb bounderies
+    blk_raw_regs = haplo_blocks.groupby(by="region_id", sort=False)
+    blk_regs = haplo_blocks_pass.groupby(by="region_id", sort=False)
+    for region_id in haplo_blocks_pass["region_id"].unique():
+        region_blks_raw = blk_regs.get_group(region_id)
+        region_blks = blk_regs.get_group(region_id)
+        region_idxs = region_blks.index
+
+        # fill left
+        if region_blks_raw["START"].iloc[0] < region_blks["START"].iloc[0]:
+            haplo_blocks_pass.at[region_idxs[0], "START"] = region_blks_raw["START"].iloc[0]
+
+        for j in range(1, len(region_blks)):
+            prev_end = region_blks.loc[region_idxs[j - 1], "END"]
+            curr_start = region_blks.loc[region_idxs[j], "START"]
+            if prev_end == curr_start:
+                continue
+            # found a gap, fill it
+            mid = int((prev_end + curr_start) // 2)
+            haplo_blocks_pass.at[region_idxs[j - 1], "END"] = mid
+            haplo_blocks_pass.at[region_idxs[j], "START"] = mid
+    haplo_blocks_pass["BLOCKSIZE"] = haplo_blocks_pass["END"] - haplo_blocks_pass["START"]
+
+    print(f"#haplotype-blocks (after filter&fill)={len(haplo_blocks_pass)}")
+    print(f"min #SNPs per block: ", np.min(haplo_blocks_pass["#SNPS"]))
+    print(f"median #SNPs per block: ", np.median(haplo_blocks_pass["#SNPS"]))
+    print(f"max #SNPs per block: ", np.max(haplo_blocks_pass["#SNPS"]))
+    print(f"min #SNP-covering-reads: ", np.min(t_allele_mat, axis=0))
+    print(f"median #SNP-covering-reads: ", np.median(t_allele_mat, axis=0))
+    print(f"max #SNP-covering-reads: ", np.max(t_allele_mat, axis=0))
+    print(f"median blocksize: ", np.median(haplo_blocks_pass["BLOCKSIZE"]))
+    return snp_info, haplo_blocks_pass, a_allele_mat, b_allele_mat, t_allele_mat

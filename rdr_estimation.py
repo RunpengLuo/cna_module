@@ -45,12 +45,12 @@ def compute_RDR(
 
     snp_grp_bins = snp_info.groupby(by=grp_id, sort=False)
     bin_bases_mat = np.zeros((nbins, 1 + ntumor_samples), dtype=np.int64)
-    for bin_id in bin_ids:
+    for bi, bin_id in enumerate(bin_ids):
         snp_bin = snp_grp_bins.get_group(bin_id)
         snp_bin_idx = snp_bin.index.to_numpy()
-        bin_bases_mat[bin_id, :] = np.sum(bases_mat[snp_bin_idx], axis=0)
+        bin_bases_mat[bi, :] = np.sum(bases_mat[snp_bin_idx], axis=0)
 
-    bin_bss = (bin_info["END"] - bin_info["START"]).to_numpy()
+    bin_bss = bin_info["BLOCKSIZE"].to_numpy()
 
     # read-depth normalized by bin length
     bin_depth_mat = bin_bases_mat / bin_bss[:, None]

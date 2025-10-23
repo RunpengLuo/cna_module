@@ -9,6 +9,7 @@ from hatchet_parser import parse_arguments_build_haplotype_blocks
 from utils import *
 from rdr_estimation import *
 from haplotype_blocks_utils import *
+from plot_utils_new import plot_1d2d
 
 """
 Build meta-SNPs, output a/b-allele counts and normalized&gc-corrected RDR.
@@ -24,8 +25,9 @@ if __name__ == "__main__":
     ref_file = args["reference"]
     gmap_file = args["genetic_map"]
 
-    max_snps_per_block = args["mspb"]
-    max_switch_error = args["mserr"]
+    min_snp_covering_reads = int(args["msr"])
+    min_snp_per_block = int(args["mspb"])
+    max_switch_error = float(args["mserr"])
     correct_gc = not args["no_gc_correct"]
 
     # input files
@@ -38,9 +40,6 @@ if __name__ == "__main__":
 
     phase_dir = os.path.join(work_dir, "phase")
     phase_file = os.path.join(phase_dir, "phased.vcf.gz")
-    if read_type == "TGS":
-        nhair_file = os.path.join(phase_dir, "Normal.hairs.tsv.gz")
-        thair_file = os.path.join(phase_dir, "Tumor.hairs.tsv.gz")
 
     # output files
     os.makedirs(out_dir, exist_ok=True)
@@ -50,6 +49,8 @@ if __name__ == "__main__":
     out_alpha_mat = os.path.join(out_dir, "block_matrix.alpha.npz")
     out_beta_mat = os.path.join(out_dir, "block_matrix.beta.npz")
     out_total_mat = os.path.join(out_dir, "block_matrix.total.npz")
+    out_baf_mat = os.path.join(out_dir, "block_matrix.baf.npz")
+    out_cov_mat = os.path.join(out_dir, "block_matrix.cov.npz")
 
     ##################################################
     print("load arguments")
@@ -74,21 +75,39 @@ if __name__ == "__main__":
     num_snps = len(snp_info)
     print(f"#SNPs={num_snps}")
 
-    snp_bss = snp_info["Blocksize"].to_numpy()
+    snp_bss = snp_info["BLOCKSIZE"].to_numpy()
     dp_mat = np.load(red_mfile)["mat"].astype(np.float32)
     bases_mat = dp_mat * snp_bss[:, None]
     # depth is fractional, #bases should be integer.
     bases_mat = np.ceil(bases_mat).astype(np.int64)
 
     ##################################################
-    # derive phase-switch errors for adjacent SNPs
-    # site-switch error is #reads supporting switched haplotype relative to phased haplotype
-    if read_type == "TGS":
-        # TODO also add PS information here
-        snp_info = estimate_switchprob_long_read(snp_info, [nhair_file, thair_file])
+    # derive phase-switch errors for adjacent SNPs by genetic map or PS info
+    nu = 1
+    min_switchprob = 1e-4
+    switch_bias = 1e-4
+    snp_info["switchprobs"] = 0.0
+    if read_type == "NGS":
+        snp_info = estimate_switchprob_genetic_map(snp_info, gmap_file, nu=nu, min_switchprob=min_switchprob)
+        # annotate PS info, usually N/A from reference/population-based phasing
+        snp_info["PS"] = (snp_info["switchprobs"] > max_switch_error).cumsum()
     else:
-        snp_info = estimate_switchprob_genetic_map(snp_info, gmap_file, nu=1)
+        # for long reads, PS information is mostly available from phasing tools
+        # use PS information to set switchprobs
+        assert np.all(snp_info["PS"].notna()), snp_info.loc[snp_info["PS"].isna(), ::]
+        same_block = snp_info["PS"] == snp_info["PS"].shift(1).fillna(False) # first dummy SNP
+        snp_info["switchprobs"] = np.where(
+            same_block,
+            min_switchprob,  # within same phase set
+            0.5 - switch_bias    # crossing phase set
+        )
+    print(snp_info.head())
+    num_phasesets = len(snp_info["PS"].unique())
+    num_segments = len(snp_info["region_id"].unique())
+    print(f"#phasesets={num_phasesets}")
+    print(f"#segments={num_segments}")
 
+    ##################################################
     snp_info, haplo_blocks, a_allele_mat, b_allele_mat, t_allele_mat = (
         build_haplo_blocks(
             snp_info,
@@ -96,8 +115,8 @@ if __name__ == "__main__":
             alt_mat,
             tot_mat,
             nsamples,
-            max_snps_per_block,
-            max_switch_error,
+            min_snp_covering_reads,
+            min_snp_per_block,
             colname="HB",
         )
     )
@@ -128,6 +147,8 @@ if __name__ == "__main__":
     np.savez_compressed(out_alpha_mat, mat=a_allele_mat)
     np.savez_compressed(out_beta_mat, mat=b_allele_mat)
     np.savez_compressed(out_total_mat, mat=t_allele_mat)
+    np.savez_compressed(out_baf_mat, mat=baf_mat)
+    np.savez_compressed(out_cov_mat, mat=cov_mat)
 
     ##################################################
     # RDR
@@ -171,3 +192,17 @@ if __name__ == "__main__":
         bb_df[name] = mat.flatten()
 
     bb_df.to_csv(out_bb_file, sep="\t", header=True, index=False)
+
+
+    plot_1d2d(
+        haplo_blocks,
+        baf_mat[:, 1:],
+        rdr_mat,
+        None,
+        None,
+        None,
+        args["genome_file"],
+        out_dir,
+        out_prefix="",
+        plot_mirror_baf=False,
+    )

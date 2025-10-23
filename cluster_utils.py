@@ -14,7 +14,7 @@ from utils import *
 
 
 ##################################################
-def estimate_overdispersion(a_counts: np.ndarray, b_counts: np.ndarray, p=0.5):
+def estimate_overdispersion(a_counts: np.ndarray, b_counts: np.ndarray, p=0.5, max_tau=200):
     """learn over-dispersion parameter from netrual bins"""
 
     def neg_loglik_logw(logw):
@@ -25,7 +25,6 @@ def estimate_overdispersion(a_counts: np.ndarray, b_counts: np.ndarray, p=0.5):
         b1 = b_counts + b0
         ll = np.sum(betaln(a1, b1) - betaln(a0, b0))
         return -ll
-    max_tau = 200
     res = minimize_scalar(
         neg_loglik_logw,
         method="bounded",
@@ -38,11 +37,10 @@ def estimate_overdispersion(a_counts: np.ndarray, b_counts: np.ndarray, p=0.5):
         return None  # fall-back to binomial instead
     return tau
 
-def make_transmat(diag, K):
-    offdiag = (1 - diag) / (K - 1)
-    transmat_ = np.diag([diag - offdiag] * K)
-    transmat_ += offdiag
-    return transmat_
+def impose_mhbaf_constraints(baf_means: np.ndarray):
+    is_minor = np.mean(baf_means, axis=1) <= 0.5
+    baf_means[~is_minor, :] =  1 - baf_means[~is_minor, :]
+    return baf_means
 
 ##################################################
 def init_hmm_kmeans_plus_plus(
@@ -83,7 +81,7 @@ def init_hmm_kmeans_plus_plus(
     return rdr_means, baf_means, rdr_vars
 
 def init_hmm_gmm(
-    X_inits: np.ndarray, K: int, M: int, random_state=42, n_init=10, min_covars=1e-6
+    X_inits: np.ndarray, K: int, M: int, init_minor=True, random_state=42, n_init=10, min_covars=1e-6
 ):
     gmm = mixture.GaussianMixture(
         n_components=K,
@@ -92,33 +90,25 @@ def init_hmm_gmm(
         init_params="k-means++",
         n_init=n_init,
         reg_covar=min_covars
-    )
-    cluster_labels = gmm.fit_predict(X=X_inits)
+    ).fit(X=X_inits)
+
     means = gmm.means_
     vars = gmm.covariances_
 
     baf_means = means[:, M:]
-    # TODO set netural -> 0.5
-    # baf_means =
+    # set mhBAF centroid
+    if init_minor:
+        baf_means = impose_mhbaf_constraints(baf_means)
 
     rdr_means = means[:, :M]
-    rdr_vars = vars[:, :M]
-    # rdrs = X_inits[:, :M]
-    # if rdrs.ndim == 1:
-    #     rdrs = rdrs[:, np.newaxis]
-    # rdr_vars = np.full((K, M), fill_value=min_covars, dtype=np.float32)
-    # for k in range(K):
-    #     mask = cluster_labels == k
-    #     num_points = np.sum(mask)
-    #     if num_points < 2:
-    #         continue
-    #     cluster_rdrs = rdrs[mask, :]
-    #     rdr_vars[k, :] = np.sum((cluster_rdrs - rdr_means[k, :]) ** 2, axis=0) / (
-    #         num_points - 1
-    #     )
-
-    rdr_vars = np.maximum(rdr_vars, min_covars)
+    rdr_vars = np.maximum(vars[:, :M], min_covars)
     return rdr_means, baf_means, rdr_vars
+
+def make_transmat(diag, K):
+    offdiag = (1 - diag) / (K - 1)
+    transmat_ = np.diag([diag - offdiag] * K)
+    transmat_ += offdiag
+    return transmat_
 
 ##################################################
 def compute_loglik(
@@ -401,7 +391,7 @@ def run_hmm(
         )
     elif init_method == "gmm":
         rdr_means, baf_means, rdr_vars = init_hmm_gmm(
-            X_inits, K, M, random_state=random_state, min_covars=min_covar
+            X_inits, K, M, init_minor=True, random_state=random_state, min_covars=min_covar
         )
 
     baf_means = np.clip(baf_means, a_min=tol, a_max=1 - tol)  # avoid log(0)

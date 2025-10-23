@@ -105,6 +105,8 @@ def plot_1d2d(
     ).to_numpy()
 
     sns.set_style("whitegrid")
+    if cluster_labels is None:
+        cluster_labels = np.ones(len(baf_mat), dtype=np.int32)
     uniq_cluster_labels = np.sort(np.unique(cluster_labels))
     num_colors = len(np.unique(cluster_labels))
     if num_colors > 8:
@@ -139,40 +141,41 @@ def plot_1d2d(
         g0.plot_joint(sns.scatterplot, s=markersize, legend=False, edgecolors="none")
         g0.plot_marginals(
             sns.histplot,
-            kde=True,
+            kde=False,
             common_norm=False,
-            bins=50
-            # stat="density",
+            bins=50,
+            stat="density",
             # element="step"
         )
         scatter = g0.ax_joint.collections[0]
         colors_ = scatter.get_facecolors()
 
-        exp_bafs = expected_bafs[:, si]
-        exp_rdrs = expected_rdrs[:, si]
-        for ci, cluster_id in enumerate(uniq_cluster_labels):
-            center_text = str(cluster_id)
-            fontdict = {"fontsize": 10}
-            g0.ax_joint.text(exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
-            if plot_mirror_baf:
-                g0.ax_joint.text(1 - exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
-        g0.ax_joint.scatter(
-            x=exp_bafs,
-            y=exp_rdrs,
-            facecolors="none",
-            edgecolors="black",
-            s=markersize_centroid,
-            linewidth=marker_bd_width,
-        )
-        if plot_mirror_baf:
+        if not expected_bafs is None and not expected_rdrs is None:
+            exp_bafs = expected_bafs[:, si]
+            exp_rdrs = expected_rdrs[:, si]
+            for ci, cluster_id in enumerate(uniq_cluster_labels):
+                center_text = str(cluster_id)
+                fontdict = {"fontsize": 10}
+                g0.ax_joint.text(exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
+                if plot_mirror_baf:
+                    g0.ax_joint.text(1 - exp_bafs[ci], exp_rdrs[ci], center_text, fontdict)
             g0.ax_joint.scatter(
-                x=1 - exp_bafs,
+                x=exp_bafs,
                 y=exp_rdrs,
                 facecolors="none",
                 edgecolors="black",
                 s=markersize_centroid,
                 linewidth=marker_bd_width,
             )
+            if plot_mirror_baf:
+                g0.ax_joint.scatter(
+                    x=1 - exp_bafs,
+                    y=exp_rdrs,
+                    facecolors="none",
+                    edgecolors="black",
+                    s=markersize_centroid,
+                    linewidth=marker_bd_width,
+                )
 
         g0.set_axis_labels(xlabel="mhBAF", ylabel="RDR")
         g0.figure.suptitle(sample)
@@ -181,7 +184,7 @@ def plot_1d2d(
         plt.close(g0.figure)
         
 
-        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(20, 8))
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(20, 6))
         gs = []
         plot_mats = [rdrs, bafs]
         for ai, y in enumerate(plot_mats):
@@ -222,7 +225,7 @@ def plot_1d2d(
         
         axes[1].set_ylabel("mhBAF")
         axes[1].title.set_text("")
-        if not plot_mirror_baf:
+        if maxBAF_ < 0.51:
             # add BAF 0.5 line
             axes[1].hlines(
                 y=0.5,
@@ -287,40 +290,41 @@ def plot_1d2d(
                         )
                     )
         
-        rdr_lines = []
-        baf_lines = []
-        bl_colors = [(0, 0, 0, 1)] * len(cluster_labels)
-        for ci, cluster_id in enumerate(uniq_cluster_labels):
-            exp_baf = expected_bafs[int(ci), si]
-            exp_rdr = expected_rdrs[int(ci), si]
-            my_starts = abs_starts[cluster_labels == cluster_id]
-            my_ends = abs_ends[cluster_labels == cluster_id]
-            rdr_lines.extend(
-                [
-                    [(my_starts[bi], exp_rdr), (my_ends[bi], exp_rdr)]
-                    for bi in range(len(my_starts))
-                ]
-            )
-            baf_lines.extend(
-                [
-                    [(my_starts[bi], exp_baf), (my_ends[bi], exp_baf)]
-                    for bi in range(len(my_starts))
-                ]
-            )
-            if not plot_mirror_baf: # also plot mirrored BAF lines
-                exp_baf2 = 1 - exp_baf
-                baf_lines.extend(
+        if not expected_bafs is None and not expected_rdrs is None:
+            rdr_lines = []
+            baf_lines = []
+            bl_colors = [(0, 0, 0, 1)] * len(cluster_labels)
+            for ci, cluster_id in enumerate(uniq_cluster_labels):
+                exp_baf = expected_bafs[int(ci), si]
+                exp_rdr = expected_rdrs[int(ci), si]
+                my_starts = abs_starts[cluster_labels == cluster_id]
+                my_ends = abs_ends[cluster_labels == cluster_id]
+                rdr_lines.extend(
                     [
-                        [(my_starts[bi], exp_baf2), (my_ends[bi], exp_baf2)]
+                        [(my_starts[bi], exp_rdr), (my_ends[bi], exp_rdr)]
                         for bi in range(len(my_starts))
                     ]
                 )
-        axes[0].add_collection(
-            LineCollection(rdr_lines, linewidth=rdr_linewidth, colors=bl_colors)
-        )
-        axes[1].add_collection(
-            LineCollection(baf_lines, linewidth=baf_linewidth, colors=bl_colors)
-        )
+                baf_lines.extend(
+                    [
+                        [(my_starts[bi], exp_baf), (my_ends[bi], exp_baf)]
+                        for bi in range(len(my_starts))
+                    ]
+                )
+                # if not plot_mirror_baf: # also plot mirrored BAF lines
+                #     exp_baf2 = 1 - exp_baf
+                #     baf_lines.extend(
+                #         [
+                #             [(my_starts[bi], exp_baf2), (my_ends[bi], exp_baf2)]
+                #             for bi in range(len(my_starts))
+                #         ]
+                #     )
+            axes[0].add_collection(
+                LineCollection(rdr_lines, linewidth=rdr_linewidth, colors=bl_colors)
+            )
+            axes[1].add_collection(
+                LineCollection(baf_lines, linewidth=baf_linewidth, colors=bl_colors)
+            )
         plt.setp(axes, xlim=(0, chr_end), xticks=xtick_chrs, xlabel="")
         for ai in range(len(gs)):
             axes[ai].set_xticklabels(xlab_chrs, rotation=60, fontsize=8)
