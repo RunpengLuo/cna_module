@@ -75,11 +75,11 @@ def parse_arguments_build_haplotype_blocks(args=None):
         help="max-switch-error-rate", # divide phaseset if not long read
     )
     parser.add_argument(
-        "--mbs",
+        "--alpha",
         required=False,
-        default=int(1e6),
+        default=0.001,
         type=float,
-        help="max-block-size", # controls 
+        help="keep blocks with RDR in [alpha, 1-alpha] quantile", # filter low-quality mapping bins
     )
 
     parser.add_argument(
@@ -88,6 +88,8 @@ def parse_arguments_build_haplotype_blocks(args=None):
         default=False,
         help="don't perform GC correction",
     )
+
+
     args = parser.parse_args()
     return vars(args)
 

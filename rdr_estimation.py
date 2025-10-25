@@ -61,26 +61,6 @@ def compute_RDR(
         print("correct for GC biases")
         gc_df = compute_gc_content(bin_info, ref_file)
         gc = gc_df["GC"].to_numpy()
-
-        # gccorr_dp_mat = np.zeros_like(bin_depth_mat, dtype=np.float32)
-        # for si in range(ntumor_samples + 1):
-        #     sample_depth = bin_depth_mat[:, si]
-        #     df = pd.DataFrame({"RD": sample_depth, "GC": gc})
-        #     mod = smf.quantreg("RD ~ GC + I(GC**2)", data=df).fit(q=0.5)
-        #     df["GCCORR"] = mod.predict(df)
-        #     corr_rdrs = df["RD"] / df["GCCORR"].where(
-        #         (df["GCCORR"] > 0) & ~pd.isnull(df["GCCORR"]), 1
-        #     )
-        #     gccorr_dp_mat[:, si] = corr_rdrs / np.mean(corr_rdrs)
-        #     fig, axes = plt.subplots(1, 2, figsize=(8,4))
-        #     sns.scatterplot(x=gc, y=sample_depth, ax=axes[0])
-        #     sns.scatterplot(x=gc, y=gccorr_dp_mat[:, si], ax=axes[1])
-        #     plt.tight_layout()
-        #     plt.savefig(os.path.join(out_dir, f"gc{si}.png"), dpi=300)
-        #     fig.clear()
-        #     plt.close()
-        # gccorr_rdr_mat = gccorr_dp_mat[:, 1:] / gccorr_dp_mat[:, 0][:, None]
-
         gccorr_rdr_mat = np.zeros_like(raw_rdr_mat, dtype=np.float32)
         for si in range(ntumor_samples):
             sample_rdr = raw_rdr_mat[:, si]
@@ -125,3 +105,22 @@ def correct_gc_biases(bin_df: pd.DataFrame, rdr_mat: np.ndarray, ref_file: str):
         gccorr_rdr_mat[:, si] = corr_rdrs / np.mean(corr_rdrs)
     
     return gccorr_rdr_mat
+
+        # gccorr_dp_mat = np.zeros_like(bin_depth_mat, dtype=np.float32)
+        # for si in range(ntumor_samples + 1):
+        #     sample_depth = bin_depth_mat[:, si]
+        #     df = pd.DataFrame({"RD": sample_depth, "GC": gc})
+        #     mod = smf.quantreg("RD ~ GC + I(GC**2)", data=df).fit(q=0.5)
+        #     df["GCCORR"] = mod.predict(df)
+        #     corr_rdrs = df["RD"] / df["GCCORR"].where(
+        #         (df["GCCORR"] > 0) & ~pd.isnull(df["GCCORR"]), 1
+        #     )
+        #     gccorr_dp_mat[:, si] = corr_rdrs / np.mean(corr_rdrs)
+        #     fig, axes = plt.subplots(1, 2, figsize=(8,4))
+        #     sns.scatterplot(x=gc, y=sample_depth, ax=axes[0])
+        #     sns.scatterplot(x=gc, y=gccorr_dp_mat[:, si], ax=axes[1])
+        #     plt.tight_layout()
+        #     plt.savefig(os.path.join(out_dir, f"gc{si}.png"), dpi=300)
+        #     fig.clear()
+        #     plt.close()
+        # gccorr_rdr_mat = gccorr_dp_mat[:, 1:] / gccorr_dp_mat[:, 0][:, None]

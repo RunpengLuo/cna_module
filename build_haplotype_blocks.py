@@ -28,6 +28,7 @@ if __name__ == "__main__":
     min_snp_covering_reads = int(args["msr"])
     min_snp_per_block = int(args["mspb"])
     max_switch_error = float(args["mserr"])
+    quantile_alpha = float(args["alpha"])
     correct_gc = not args["no_gc_correct"]
 
     # input files
@@ -121,11 +122,43 @@ if __name__ == "__main__":
         )
     )
     block_ids = haplo_blocks["HB"].to_numpy()
-    num_blocks = len(block_ids)
+    num_blocks = len(haplo_blocks)
 
     baf_mat = b_allele_mat / t_allele_mat
     cov_mat = t_allele_mat / haplo_blocks["#SNPS"].to_numpy()[:, None]
+    ##################################################
+    # RDR
+    rdr_mat = compute_RDR(
+        block_ids,
+        haplo_blocks,
+        snp_info,
+        bases_mat,
+        num_blocks,
+        ntumor_samples,
+        correct_gc=correct_gc,
+        ref_file=ref_file,
+        out_dir=out_dir,
+        grp_id="HB",
+    )
 
+    ##################################################
+    # TODO prune outlier blocks?
+    if quantile_alpha != 0:
+        q_lo, q_hi = np.quantile(rdr_mat, [quantile_alpha, 1 - quantile_alpha], axis=0, keepdims=True)  # (1, n_samples)
+        q_mask_per_sample = (rdr_mat >= q_lo) & (rdr_mat <= q_hi)
+        q_mask = np.all(q_mask_per_sample, axis=1)      # (n_bins,)
+        print(f"#blocks filtered by RDR quantile={np.sum(~q_mask)}/{len(q_mask)}")
+        a_allele_mat = a_allele_mat[q_mask, :]
+        b_allele_mat = b_allele_mat[q_mask, :]
+        t_allele_mat = t_allele_mat[q_mask, :]
+        baf_mat = baf_mat[q_mask, :]
+        cov_mat = cov_mat[q_mask, :]
+        rdr_mat = rdr_mat[q_mask, :]
+        haplo_blocks = fill_gap_haplo_block(haplo_blocks.loc[q_mask, :].copy(deep=True))
+        num_blocks = len(haplo_blocks)
+
+
+    ##################################################
     haplo_blocks.to_csv(
         out_block_file,
         sep="\t",
@@ -144,6 +177,7 @@ if __name__ == "__main__":
         ],
     )
 
+    np.savez_compressed(out_rdr_mat, mat=rdr_mat)
     np.savez_compressed(out_alpha_mat, mat=a_allele_mat)
     np.savez_compressed(out_beta_mat, mat=b_allele_mat)
     np.savez_compressed(out_total_mat, mat=t_allele_mat)
@@ -151,26 +185,6 @@ if __name__ == "__main__":
     np.savez_compressed(out_cov_mat, mat=cov_mat)
 
     ##################################################
-    # RDR
-    rdr_mat = compute_RDR(
-        block_ids,
-        haplo_blocks,
-        snp_info,
-        bases_mat,
-        num_blocks,
-        ntumor_samples,
-        correct_gc=correct_gc,
-        ref_file=ref_file,
-        out_dir=out_dir,
-        grp_id="HB",
-    )
-    np.savez_compressed(out_rdr_mat, mat=rdr_mat)
-
-    ##################################################
-    # plot here TODO
-
-    ##################################################
-    # bb file
     bb_df = pd.DataFrame(
         {
             "#CHR": np.repeat(haplo_blocks["#CHR"], ntumor_samples),
@@ -193,7 +207,7 @@ if __name__ == "__main__":
 
     bb_df.to_csv(out_bb_file, sep="\t", header=True, index=False)
 
-
+    ##################################################
     plot_1d2d(
         haplo_blocks,
         baf_mat[:, 1:],

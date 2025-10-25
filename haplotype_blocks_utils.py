@@ -182,27 +182,8 @@ def build_haplo_blocks(
     b_allele_mat = b_allele_mat[~hb_below_msr]
 
     # absorb bounderies
-    blk_raw_regs = haplo_blocks.groupby(by="region_id", sort=False)
-    blk_regs = haplo_blocks_pass.groupby(by="region_id", sort=False)
-    for region_id in haplo_blocks_pass["region_id"].unique():
-        region_blks_raw = blk_regs.get_group(region_id)
-        region_blks = blk_regs.get_group(region_id)
-        region_idxs = region_blks.index
-
-        # fill left
-        if region_blks_raw["START"].iloc[0] < region_blks["START"].iloc[0]:
-            haplo_blocks_pass.at[region_idxs[0], "START"] = region_blks_raw["START"].iloc[0]
-
-        for j in range(1, len(region_blks)):
-            prev_end = region_blks.loc[region_idxs[j - 1], "END"]
-            curr_start = region_blks.loc[region_idxs[j], "START"]
-            if prev_end == curr_start:
-                continue
-            # found a gap, fill it
-            mid = int((prev_end + curr_start) // 2)
-            haplo_blocks_pass.at[region_idxs[j - 1], "END"] = mid
-            haplo_blocks_pass.at[region_idxs[j], "START"] = mid
-    haplo_blocks_pass["BLOCKSIZE"] = haplo_blocks_pass["END"] - haplo_blocks_pass["START"]
+    haplo_blocks_pass = fill_gap_haplo_block(haplo_blocks)
+    
 
     print(f"#haplotype-blocks (after filter&fill)={len(haplo_blocks_pass)}")
     print(f"min #SNPs per block: ", np.min(haplo_blocks_pass["#SNPS"]))
@@ -213,3 +194,29 @@ def build_haplo_blocks(
     print(f"max #SNP-covering-reads: ", np.max(t_allele_mat, axis=0))
     print(f"median blocksize: ", np.median(haplo_blocks_pass["BLOCKSIZE"]))
     return snp_info, haplo_blocks_pass, a_allele_mat, b_allele_mat, t_allele_mat
+
+def fill_gap_haplo_block(haplo_blocks: pd.DataFrame):
+    """
+        absorb bounderies within segment
+    """
+    blk_regs = haplo_blocks.groupby(by="region_id", sort=False)
+    for region_id in haplo_blocks["region_id"].unique():
+        region_blks_raw = blk_regs.get_group(region_id)
+        region_blks = blk_regs.get_group(region_id)
+        region_idxs = region_blks.index
+
+        # fill left
+        if region_blks_raw["START"].iloc[0] < region_blks["START"].iloc[0]:
+            haplo_blocks.at[region_idxs[0], "START"] = region_blks_raw["START"].iloc[0]
+
+        for j in range(1, len(region_blks)):
+            prev_end = region_blks.loc[region_idxs[j - 1], "END"]
+            curr_start = region_blks.loc[region_idxs[j], "START"]
+            if prev_end == curr_start:
+                continue
+            # found a gap, fill it
+            mid = int((prev_end + curr_start) // 2)
+            haplo_blocks.at[region_idxs[j - 1], "END"] = mid
+            haplo_blocks.at[region_idxs[j], "START"] = mid
+    haplo_blocks["BLOCKSIZE"] = haplo_blocks["END"] - haplo_blocks["START"]
+    return haplo_blocks
