@@ -36,7 +36,8 @@ if __name__ == "__main__":
     verbose = True
 
     lasso_penalty = 0.5
-    init_method = "ward" # "k-means++" "gmm"
+    # init_method = "ward" # "k-means++" "gmm"
+    init_method = "k-means++"
     decode_method = "map"
     score_method = "bic"
 
@@ -70,12 +71,6 @@ if __name__ == "__main__":
 
     ##################################################
     print("prepare HMM inputs")
-
-    # estimate over-dispersion parameter from normal sample
-    tau = estimate_overdispersion(alphas[:, 0], betas[:, 0], max_tau=1e5)
-    use_binom = tau is None
-    print(f"estimated tau={tau}, use binom={use_binom}")
-
     # divide into chromosome segments
     X_lengths = blocks.groupby(by="region_id", sort=False).agg("size").to_numpy()
     _nsegments = np.sum(X_lengths)
@@ -92,20 +87,42 @@ if __name__ == "__main__":
         X_alphas = X_alphas[:, np.newaxis]
         X_betas = X_betas[:, np.newaxis]
         X_totals = X_totals[:, np.newaxis]
+    
+    X_bafs = X_betas / X_totals
+    X_mhbafs = impose_mhbaf_constraints(X_bafs)
 
     # transition matrix - phasing, (N, )
     switchprobs = blocks["switchprobs"].to_numpy()
     log_switchprobs = np.log(switchprobs)
     log_stayprobs = np.log(1 - switchprobs)
 
+    # estimate over-dispersion parameter from normal sample
+    # tau = estimate_overdispersion(alphas[:, 0], betas[:, 0], max_tau=1e5)
+    # use_binom = tau is None
+    start = 0
+    taus = np.zeros_like(X_lengths, dtype=np.float32)
+    for s, nobs in enumerate(X_lengths):
+        end = start + nobs
+        seg_tau = estimate_overdispersion(alphas[start:end, 0], 
+                                      betas[start:end, 0], 
+                                      max_tau=1e5)
+        if seg_tau is None:
+            taus[s] = 1e5
+        else:
+            taus[s] = seg_tau
+        start = end
+    
+    tau = np.median(taus)
+    use_binom = False
+    print(taus.round(3))
+    print(np.mean(taus), np.median(taus), np.var(taus))
+    print(f"estimated tau={tau}, use binom={use_binom}")
     ##################################################
     print("fused lasso segmentation")
-    seg_rdrs, seg_mhbafs = fused_lasso_segmentations(
+    seg_rdrs, seg_mhbafs, flasso_labels = fused_lasso_segmentations(
         blocks,
         X_rdrs,
-        X_alphas,
-        X_betas,
-        X_totals,
+        X_mhbafs,
         X_lengths,
         plot_dir,
         penalty=lasso_penalty,
@@ -125,8 +142,11 @@ if __name__ == "__main__":
         best_model = {"model_ll": -np.inf}
         for s in range(restarts):
             rdr_means, rdr_vars, baf_means = init_hmm_segs(
+                X_rdrs,
+                X_mhbafs,
                 seg_rdrs, 
-                seg_mhbafs, 
+                seg_mhbafs,
+                flasso_labels,
                 K, 
                 s, 
                 init_method=init_method, 
@@ -209,6 +229,7 @@ if __name__ == "__main__":
         # save to bbc and block TODO remove this later!
         # blocks["CLUSTER"] = cluster_labels
         bb["CLUSTER"] = np.repeat(cluster_labels, nsamples)
+        bb["BAF"] = phased_bafs.flatten(order="F")
         bb_grps = bb.groupby(by="CLUSTER", sort=False)
         seg_rows = []
         for l, label in enumerate(unique_labels):

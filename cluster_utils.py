@@ -36,7 +36,6 @@ def estimate_overdispersion(
         # options={"ftol":1e-6}
     )
     tau = np.exp(res.x)
-    print(f"estimated tau={tau}")
     if np.abs(tau - max_tau) <= 1:
         return None  # fall-back to binomial instead
     return tau

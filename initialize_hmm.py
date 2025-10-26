@@ -5,10 +5,10 @@ from collections import Counter
 import kneed
 import numpy as np
 import pandas as pd
-from scipy.special import betaln, gammaln, logsumexp, xlogy
-from scipy.optimize import minimize, minimize_scalar
 from sklearn import cluster, mixture
 from utils import *
+from sklearn.preprocessing import StandardScaler
+
 
 import ruptures
 
@@ -45,10 +45,6 @@ def init_hmm(
     X_rdrs_scaled = (X_rdrs - offset) / rdr_scale
     X_bafs = X_betas / X_totals
     X_bafs = impose_mhbaf_constraints(X_bafs)
-    # X_inits1 = np.concatenate([X_rdrs_scaled, X_bafs], axis=1)
-    # X_inits2 = np.concatenate([X_rdrs_scaled, 1 - X_bafs], axis=1)
-    # init_mask = np.random.randint(0, 2, size=X_bafs.shape[0], dtype=bool)
-    # X_inits = np.where(init_mask[:, None], X_inits1, X_inits2)
     X_inits = np.concatenate([X_rdrs_scaled, X_bafs], axis=1)
 
     if init_method == "k-means++":
@@ -128,32 +124,27 @@ def init_hmm(
     return rdr_means, rdr_vars, baf_means
 
 ##################################################
-def bkps_to_labels(bkps, N=None):
-    """Convert ruptures breakpoints to integer segment labels."""
-    if N is None:
-        N = bkps[-1]
-    labels = np.zeros(N, dtype=int)
-    start = 0
-    for k, end in enumerate(bkps):
-        labels[start:end] = k
-        start = end
-    return labels
+def split_segment(rel_start, rel_end, cap):
+    """Split [rel_start, rel_end) into balanced sub-blocks capped by cap."""
+    L = rel_end - rel_start
+    if L <= cap:
+        return [(rel_start, rel_end)]
+    n_blocks = int(np.ceil(L / cap))
+    cut_points = np.linspace(rel_start, rel_end, n_blocks + 1, dtype=int)
+    return list(zip(cut_points[:-1], cut_points[1:]))
 
 def fused_lasso_segmentations(
     blocks: pd.DataFrame,
     X_rdrs: np.ndarray,
-    X_alphas: np.ndarray,
-    X_betas: np.ndarray,
-    X_totals: np.ndarray,
+    X_mhbafs: np.ndarray,
     X_lengths: np.ndarray,
     plot_dir: str,
     penalty=3,
+    min_block_size=100,
     genome_file=None,
 ):
-    M = X_alphas.shape[1]
-    X_bafs = X_betas / X_totals
-    X_mhbafs = impose_mhbaf_constraints(X_bafs)
     X_inits = np.concatenate([X_rdrs, X_mhbafs], axis=1)
+    flasso_labels = np.empty(np.sum(X_lengths), dtype=np.int32)
     binary_labels = np.empty(np.sum(X_lengths), dtype=np.int32)
 
     start = 0
@@ -172,25 +163,32 @@ def fused_lasso_segmentations(
             jump=2
         ).fit(X_inits_sub)
         bkps = algo.predict(pen=penalty)
+        assert bkps[-1] == nobs
         rel_start = 0
         for rel_end in bkps:
-            abs_start = start + rel_start
-            abs_end = start + rel_end
-            binary_labels[abs_start:abs_end] = bin_k
-            mean_rdrs = np.mean(X_rdrs[abs_start:abs_end, :], axis=0)
-            mean_mhbafs = np.mean(X_mhbafs[abs_start:abs_end, :], axis=0)
-            seg_rdrs.append(mean_rdrs)
-            seg_mhbafs.append(mean_mhbafs)
+            prev_k = abs_k
+            # iterate sub-blocks with cap
+            for sub_start in range(rel_start, rel_end, min_block_size):
+                abs_start = start + sub_start
+                abs_end = min(start + rel_end, abs_start + min_block_size)
 
-            bin_k = (bin_k + 1) % 2
+                binary_labels[abs_start:abs_end]  = bin_k
+                flasso_labels[abs_start:abs_end] = abs_k
+
+                seg_rdrs.append(np.mean(X_rdrs[abs_start:abs_end, :], axis=0))
+                seg_mhbafs.append(np.mean(X_mhbafs[abs_start:abs_end, :], axis=0))
+
+                bin_k = (bin_k + 1) % 2
+                abs_k += 1
+
+            abs_k = max(abs_k, prev_k + 1)
             rel_start = rel_end
-        abs_k += len(bkps)
         start = end
     
     print(f"#fused-lasso segments={abs_k}")
     plot_1d2d(
         blocks,
-        X_bafs,
+        X_mhbafs,
         X_rdrs,
         binary_labels,
         None,
@@ -204,27 +202,27 @@ def fused_lasso_segmentations(
     seg_rdrs = np.vstack(seg_rdrs)
     seg_mhbafs = np.vstack(seg_mhbafs)
 
-    return seg_rdrs, seg_mhbafs
+    return seg_rdrs, seg_mhbafs, flasso_labels
 
 def init_hmm_segs(
+    X_rdrs: np.ndarray,
+    X_mhbafs: np.ndarray,
     seg_rdrs: np.ndarray,
     seg_mhbafs: np.ndarray,
+    flasso_labels: np.ndarray,
     K: int,
     random_state=42,
     min_covar=1e-3,
     tol=1e-6,
-    init_method="k-means++",
-    verbose=True,
+    init_method="ward",
     plot_dir=None,
+    verbose=True,
 ):
     assert init_method in ["k-means++", "ward"]
     M = seg_rdrs.shape[1]
 
-    offset = 0
-    rdr_scale = np.max(seg_rdrs, axis=0, keepdims=True)
-    seg_rdrs_scaled = (seg_rdrs - offset) / rdr_scale # (0, 1)
-
-    seg_inits = np.concatenate([seg_rdrs_scaled, seg_mhbafs], axis=1)
+    seg_inits = np.concatenate([seg_rdrs, seg_mhbafs], axis=1)
+    seg_inits_std = StandardScaler().fit_transform(seg_inits)
     if init_method == "k-means++":
         kmeans = cluster.KMeans(
             n_clusters=K,
@@ -232,24 +230,32 @@ def init_hmm_segs(
             init="k-means++",
             max_iter=1
         )
-        cluster_labels = kmeans.fit_predict(X=seg_inits)
-        means = kmeans.cluster_centers_
-        baf_means = means[:, M:]
-        rdr_means = means[:, :M] * rdr_scale + offset
-        rdr_vars = np.full((K, M), fill_value=min_covar, dtype=np.float32)
+        cluster_labels = kmeans.fit_predict(X=seg_inits_std)
     elif init_method == "ward":
         hier = cluster.AgglomerativeClustering(
             n_clusters=K,
             linkage="ward",
         )
-        cluster_labels = hier.fit_predict(X=seg_inits)
-        means = np.array([seg_inits[cluster_labels==k].mean(axis=0) for 
-                          k in np.unique(cluster_labels)])
-        baf_means = means[:, M:]
-        rdr_means = means[:, :M] * rdr_scale + offset
-        rdr_vars = np.full((K, M), fill_value=min_covar, dtype=np.float32)
+        cluster_labels = hier.fit_predict(X=seg_inits_std)
     else:
         raise ValueError()
+    
+    baf_means = np.full((K, M), fill_value=0, dtype=np.float32)
+    rdr_means = np.full((K, M), fill_value=0, dtype=np.float32)
+    rdr_vars = np.full((K, M), fill_value=min_covar, dtype=np.float32)
+    seg_labels = np.arange(seg_mhbafs.shape[0])
+    for k in range(K):
+        raw_mask = np.isin(flasso_labels, seg_labels[cluster_labels == k])
+        num_points = np.sum(raw_mask)
+        if num_points < 2:
+            continue
+        cluster_rdrs = X_rdrs[raw_mask, :]
+        cluster_bafs = X_mhbafs[raw_mask, :]
+        rdr_means[k] = np.mean(cluster_rdrs, axis=0)
+        baf_means[k] = np.mean(cluster_bafs, axis=0)
+        rdr_vars[k, :] = np.sum((cluster_rdrs - rdr_means[k]) ** 2, axis=0) / (
+            num_points - 1
+        )
 
     if not plot_dir is None:
         fig, ax = plt.subplots(figsize=(6, 5))
