@@ -11,10 +11,13 @@ from sklearn import cluster, mixture
 from utils import *
 
 # from numba import njit
-
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 ##################################################
-def estimate_overdispersion(a_counts: np.ndarray, b_counts: np.ndarray, p=0.5, max_tau=200):
+def estimate_overdispersion(
+    a_counts: np.ndarray, b_counts: np.ndarray, p=0.5, max_tau=200
+):
     """learn over-dispersion parameter from netrual bins"""
 
     def neg_loglik_logw(logw):
@@ -25,6 +28,7 @@ def estimate_overdispersion(a_counts: np.ndarray, b_counts: np.ndarray, p=0.5, m
         b1 = b_counts + b0
         ll = np.sum(betaln(a1, b1) - betaln(a0, b0))
         return -ll
+
     res = minimize_scalar(
         neg_loglik_logw,
         method="bounded",
@@ -37,78 +41,13 @@ def estimate_overdispersion(a_counts: np.ndarray, b_counts: np.ndarray, p=0.5, m
         return None  # fall-back to binomial instead
     return tau
 
-def impose_mhbaf_constraints(baf_means: np.ndarray):
-    is_minor = np.mean(baf_means, axis=1) <= 0.5
-    baf_means[~is_minor, :] =  1 - baf_means[~is_minor, :]
-    return baf_means
-
 ##################################################
-def init_hmm_kmeans_plus_plus(
-    X_inits: np.ndarray, K: int, M: int, random_state=42, n_init=10, min_covars=1e-6
-):
-    """
-    X_inits: (N, M * 2), M=#iid tumor samples.
-    """
-    kmeans = cluster.KMeans(
-        n_clusters=K,
-        random_state=random_state,
-        init="k-means++",
-        n_init=n_init,
-    )
-    cluster_labels = kmeans.fit_predict(X=X_inits)
-    means = kmeans.cluster_centers_
-
-    baf_means = means[:, M:]
-    # TODO set netural -> 0.5
-    # baf_means =
-
-    rdr_means = means[:, :M]
-    rdrs = X_inits[:, :M]
-    if rdrs.ndim == 1:
-        rdrs = rdrs[:, np.newaxis]
-    rdr_vars = np.full((K, M), fill_value=min_covars, dtype=np.float32)
-    for k in range(K):
-        mask = cluster_labels == k
-        num_points = np.sum(mask)
-        if num_points < 2:
-            continue
-        cluster_rdrs = rdrs[mask, :]
-        rdr_vars[k, :] = np.sum((cluster_rdrs - rdr_means[k, :]) ** 2, axis=0) / (
-            num_points - 1
-        )
-
-    rdr_vars = np.maximum(rdr_vars, min_covars)
-    return rdr_means, baf_means, rdr_vars
-
-def init_hmm_gmm(
-    X_inits: np.ndarray, K: int, M: int, init_minor=True, random_state=42, n_init=10, min_covars=1e-6
-):
-    gmm = mixture.GaussianMixture(
-        n_components=K,
-        random_state=random_state,
-        covariance_type="diag",
-        init_params="k-means++",
-        n_init=n_init,
-        reg_covar=min_covars
-    ).fit(X=X_inits)
-
-    means = gmm.means_
-    vars = gmm.covariances_
-
-    baf_means = means[:, M:]
-    # set mhBAF centroid
-    if init_minor:
-        baf_means = impose_mhbaf_constraints(baf_means)
-
-    rdr_means = means[:, :M]
-    rdr_vars = np.maximum(vars[:, :M], min_covars)
-    return rdr_means, baf_means, rdr_vars
-
 def make_transmat(diag, K):
     offdiag = (1 - diag) / (K - 1)
     transmat_ = np.diag([diag - offdiag] * K)
     transmat_ += offdiag
     return transmat_
+
 
 ##################################################
 def compute_loglik(
@@ -176,6 +115,7 @@ def compute_loglik(
     lls0 = ll_rdrs + ll_bafs_h0
     lls1 = ll_rdrs + ll_bafs_h1
     return lls0, lls1
+
 
 ##################################################
 def forward_backward(
@@ -262,6 +202,7 @@ def forward_backward(
         start = end
     return posts, np.sum(logliks)
 
+
 ##################################################
 def _do_mstep_emissions(
     X_rdrs: np.ndarray,
@@ -272,7 +213,7 @@ def _do_mstep_emissions(
     M: int,
     N: int,
     tau=None,
-    min_covar=1e-6,
+    min_covar=1e-3,
     tol=1e-6,
 ):
     def neg_loglik(p):  # convexity proof?
@@ -335,28 +276,30 @@ def _do_mstep_startprobs(
     log_startprobs = np.log(startprobs + tol)
     return log_startprobs
 
+
 ##################################################
 def run_hmm(
     X_rdrs: np.ndarray,
     X_alphas: np.ndarray,
     X_betas: np.ndarray,
     X_totals: np.ndarray,
-    X_inits: np.ndarray,
     X_lengths: np.ndarray,
     log_switchprobs: np.ndarray,
     log_stayprobs: np.ndarray,
     log_transmat: np.ndarray,
     K: int,
+    rdr_means: np.ndarray, 
+    rdr_vars: np.ndarray, 
+    baf_means: np.ndarray,
     tau=None,
     n_iter=10,
-    random_state=42,
-    min_covar=1e-6,
+    min_covar=1e-3,
     tol_ll=1e-4,
     tol=1e-6,
-    init_method="k-means++",
     decode_method="map",
     score_method="bic",
     verbose=True,
+    plot_dir=None,
 ):
     """co-cluster allele counts and RDRs
     latent variables z_n=1...K, h_n=0 or 1.
@@ -371,9 +314,7 @@ def run_hmm(
         tau (float, optional): over-dispersion. Defaults to None.
         min_covar (float, optional): min covariance for RDR. Defaults to 1e-3.
         n_iter (int, optional): number of iterations. Defaults to 10.
-        random_state (int, optional): Defaults to 42.
         tol (_type_, optional): Defaults to 1e-6.
-        init_method (str, optional): Defaults to "k-means++".
         verbose (bool, optional): Defaults to True.
     """
     (N, M) = X_rdrs.shape
@@ -382,26 +323,6 @@ def run_hmm(
     assert score_method in ["bic"]
     assert n_iter > 1
 
-    # init means and covars
-    # TODO standardize means and vars
-    assert init_method in ["k-means++", "gmm"]
-    if init_method == "k-means++":
-        rdr_means, baf_means, rdr_vars = init_hmm_kmeans_plus_plus(
-            X_inits, K, M, random_state=random_state, min_covars=min_covar
-        )
-    elif init_method == "gmm":
-        rdr_means, baf_means, rdr_vars = init_hmm_gmm(
-            X_inits, K, M, init_minor=True, random_state=random_state, min_covars=min_covar
-        )
-
-    baf_means = np.clip(baf_means, a_min=tol, a_max=1 - tol)  # avoid log(0)
-    if verbose:
-        print(f"Init")
-        print(baf_means.flatten())
-        print(rdr_means.flatten())
-        print(rdr_vars.flatten())
-
-    # segment-specific startprobs?
     S = len(X_lengths)
     startprobs = np.full((S, K, 2), 1.0 / (2 * K))
     log_startprobs = np.log(startprobs)
@@ -467,16 +388,14 @@ def run_hmm(
             K,
             N,
         )
-    
+
     score = 0
     if score_method == "bic":
-        num_free_params = 2 * K * M + K * M # emissions
-        num_free_params += S * (2 * K - 1) # startprobs
+        num_free_params = 2 * K * M + K * M  # emissions
+        num_free_params += S * (2 * K - 1)  # startprobs
         score = -2.0 * model_ll + num_free_params * np.log(N)
 
-
     return {
-        "seed": random_state,
         "RDR_means": rdr_means,
         "RDR_vars": rdr_vars,
         "BAF_means": baf_means,
@@ -487,6 +406,7 @@ def run_hmm(
         "cluster_labels": cluster_labels,
         "phase_labels": phase_labels,
     }
+
 
 ##################################################
 # viterbi decode

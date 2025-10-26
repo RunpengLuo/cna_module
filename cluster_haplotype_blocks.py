@@ -12,6 +12,7 @@ from utils import *
 from hatchet_parser import parse_arguments_cluster_blocks
 from cluster_utils import *
 from plot_utils_new import plot_1d2d
+from initialize_hmm import *
 
 """
 Input:
@@ -27,17 +28,17 @@ if __name__ == "__main__":
     work_dir = args["work_dir"]
     out_dir = os.path.join(work_dir, args["out_dir"])
 
-    # baf_tol = 0.02  # collapse to 0.5 if estimated BAF deviation within 0.5-baf_tol and 0.5+baf_tol
-
     diag_t = args["t"]
     minK = args["minK"]
     maxK = args["maxK"]
     restarts = args["restarts"]
     n_iter = args["niters"]
     verbose = True
-    init_method="gmm"
-    decode_method="map"
-    score_method="bic"
+
+    lasso_penalty = 0.5
+    init_method = "ward" # "k-means++" "gmm"
+    decode_method = "map"
+    score_method = "bic"
 
     # input files
     block_dir = os.path.join(work_dir, args["block_dir"])
@@ -71,7 +72,7 @@ if __name__ == "__main__":
     print("prepare HMM inputs")
 
     # estimate over-dispersion parameter from normal sample
-    tau = estimate_overdispersion(alphas[:, 0], betas[:, 0], max_tau=500)
+    tau = estimate_overdispersion(alphas[:, 0], betas[:, 0], max_tau=1e5)
     use_binom = tau is None
     print(f"estimated tau={tau}, use binom={use_binom}")
 
@@ -92,14 +93,24 @@ if __name__ == "__main__":
         X_betas = X_betas[:, np.newaxis]
         X_totals = X_totals[:, np.newaxis]
 
-    # used for init p
-    X_bafs = X_betas / X_totals
-    X_inits = np.concatenate([X_rdrs, X_bafs], axis=1)
-
     # transition matrix - phasing, (N, )
     switchprobs = blocks["switchprobs"].to_numpy()
     log_switchprobs = np.log(switchprobs)
     log_stayprobs = np.log(1 - switchprobs)
+
+    ##################################################
+    print("fused lasso segmentation")
+    seg_rdrs, seg_mhbafs = fused_lasso_segmentations(
+        blocks,
+        X_rdrs,
+        X_alphas,
+        X_betas,
+        X_totals,
+        X_lengths,
+        plot_dir,
+        penalty=lasso_penalty,
+        genome_file=genome_file,
+    )
 
     ##################################################
     bb = pd.read_csv(bb_file, sep="\t")
@@ -113,23 +124,43 @@ if __name__ == "__main__":
         log_transmat = np.log(make_transmat(1 - diag_t, K))
         best_model = {"model_ll": -np.inf}
         for s in range(restarts):
+            rdr_means, rdr_vars, baf_means = init_hmm_segs(
+                seg_rdrs, 
+                seg_mhbafs, 
+                K, 
+                s, 
+                init_method=init_method, 
+                plot_dir=plot_dir
+            )
+            # rdr_means, rdr_vars, baf_means = init_hmm(
+            #     X_rdrs,
+            #     X_alphas,
+            #     X_betas,
+            #     X_totals,
+            #     K,
+            #     random_state=s,
+            #     init_minor=True,
+            #     init_method=init_method,
+            #     verbose=verbose,
+            # )
             curr_model = run_hmm(
                 X_rdrs,
                 X_alphas,
                 X_betas,
                 X_totals,
-                X_inits,
                 X_lengths,
                 log_switchprobs,
                 log_stayprobs,
                 log_transmat,
                 K,
+                rdr_means,
+                rdr_vars,
+                baf_means,
                 tau,
                 n_iter,
-                random_state=s,
-                init_method=init_method,
                 decode_method=decode_method,
-                score_method=score_method
+                score_method=score_method,
+                plot_dir=plot_dir,
             )
             model_ll = curr_model["model_ll"]
             print(f"restart={s}, model loglik={model_ll: .6f}")
@@ -157,11 +188,6 @@ if __name__ == "__main__":
         )
         phased_bafs = X_betas_phased / X_totals
         # manually merge clusters? TODO
-
-        # TODO
-        switch_probs_ = blocks.loc[blocks["#CHR"] == "chr2"]
-
-
 
         model_scores.append(best_model["model_score"])
 
@@ -224,17 +250,21 @@ if __name__ == "__main__":
         seg_file = os.path.join(bbc_dir, f"bulk{K}.seg")
         bb.to_csv(bbc_file, sep="\t", header=True, index=False)
         seg.to_csv(seg_file, sep="\t", header=True, index=False)
-    
+
     if score_method == "bic":
         opt_K = minK + np.argmin(model_scores)
     else:
         raise ValueError()
-    
-    scores_df = pd.DataFrame(data={"K": list(range(minK, maxK + 1)), score_method: model_scores})
-    scores_df.to_csv(os.path.join(out_dir, "model_scores.tsv"), sep="\t", header=True, index=False)
+
+    scores_df = pd.DataFrame(
+        data={"K": list(range(minK, maxK + 1)), score_method: model_scores}
+    )
+    scores_df.to_csv(
+        os.path.join(out_dir, "model_scores.tsv"), sep="\t", header=True, index=False
+    )
 
     print("Optimal K:", opt_K)
-    
+
     shutil.copy2(
         Path(os.path.join(bbc_dir, f"bulk{opt_K}.bbc")),
         Path(os.path.join(bbc_dir, f"bulk.bbc")),

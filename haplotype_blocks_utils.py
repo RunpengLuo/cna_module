@@ -182,8 +182,7 @@ def build_haplo_blocks(
     b_allele_mat = b_allele_mat[~hb_below_msr]
 
     # absorb bounderies
-    haplo_blocks_pass = fill_gap_haplo_block(haplo_blocks)
-    
+    haplo_blocks_pass = fill_gap_haplo_block(haplo_blocks_pass)
 
     print(f"#haplotype-blocks (after filter&fill)={len(haplo_blocks_pass)}")
     print(f"min #SNPs per block: ", np.min(haplo_blocks_pass["#SNPS"]))

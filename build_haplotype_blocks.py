@@ -78,9 +78,6 @@ if __name__ == "__main__":
 
     snp_bss = snp_info["BLOCKSIZE"].to_numpy()
     dp_mat = np.load(red_mfile)["mat"].astype(np.float32)
-    bases_mat = dp_mat * snp_bss[:, None]
-    # depth is fractional, #bases should be integer.
-    bases_mat = np.ceil(bases_mat).astype(np.int64)
 
     ##################################################
     # derive phase-switch errors for adjacent SNPs by genetic map or PS info
@@ -132,9 +129,10 @@ if __name__ == "__main__":
         block_ids,
         haplo_blocks,
         snp_info,
-        bases_mat,
+        dp_mat,
         num_blocks,
         ntumor_samples,
+        read_type,
         correct_gc=correct_gc,
         ref_file=ref_file,
         out_dir=out_dir,
@@ -142,7 +140,7 @@ if __name__ == "__main__":
     )
 
     ##################################################
-    # TODO prune outlier blocks?
+    # prune RDR outlier blocks
     if quantile_alpha != 0:
         q_lo, q_hi = np.quantile(rdr_mat, [quantile_alpha, 1 - quantile_alpha], axis=0, keepdims=True)  # (1, n_samples)
         q_mask_per_sample = (rdr_mat >= q_lo) & (rdr_mat <= q_hi)
