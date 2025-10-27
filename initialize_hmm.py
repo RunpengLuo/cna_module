@@ -117,9 +117,9 @@ def init_hmm(
         raise ValueError()
     if verbose:
         print(f"Init")
-        print(baf_means.flatten())
-        print(rdr_means.flatten())
-        print(rdr_vars.flatten())
+        print(baf_means.flatten().round(3))
+        print(rdr_means.flatten().round(3))
+        print(rdr_vars.flatten().round(3))
 
     return rdr_means, rdr_vars, baf_means
 
@@ -228,7 +228,7 @@ def init_hmm_segs(
             n_clusters=K,
             random_state=random_state,
             init="k-means++",
-            max_iter=1
+            n_init=1,
         )
         cluster_labels = kmeans.fit_predict(X=seg_inits_std)
     elif init_method == "ward":

@@ -50,6 +50,12 @@ def parse_arguments_build_haplotype_blocks(args=None):
         type=str,
         help="genetic map file",
     )
+    parser.add_argument(
+        "--mapp_file",
+        required=False,
+        type=str,
+        help="mappability BED file",
+    )
 
     ##################################################
     # Parameters

@@ -23,7 +23,9 @@ if __name__ == "__main__":
 
     read_type = args["read_type"]
     ref_file = args["reference"]
+    genome_file = args["genome_file"]
     gmap_file = args["genetic_map"]
+    mapp_file = args["mapp_file"]
 
     min_snp_covering_reads = int(args["msr"])
     min_snp_per_block = int(args["mspb"])
@@ -84,7 +86,6 @@ if __name__ == "__main__":
     nu = 1
     min_switchprob = 1e-4
     switch_bias = 1e-4
-    snp_info["switchprobs"] = 0.0
     if read_type == "NGS":
         snp_info = estimate_switchprob_genetic_map(snp_info, gmap_file, nu=nu, min_switchprob=min_switchprob)
         # annotate PS info, usually N/A from reference/population-based phasing
@@ -135,6 +136,8 @@ if __name__ == "__main__":
         read_type,
         correct_gc=correct_gc,
         ref_file=ref_file,
+        mapp_file=mapp_file,
+        genome_file=genome_file,
         out_dir=out_dir,
         grp_id="HB",
     )
@@ -213,7 +216,7 @@ if __name__ == "__main__":
         None,
         None,
         None,
-        args["genome_file"],
+        genome_file,
         out_dir,
         out_prefix="",
         plot_mirror_baf=False,

@@ -359,9 +359,9 @@ def run_hmm(
             print(
                 f"Iter {it:03d} | Q={loglik: .6f} | delta={delta_ll: .6f} | time={t1 - t0:.2f}s"
             )
-            print("BAF means: ", baf_means.flatten())
-            print("RDR means: ", rdr_means.flatten())
-            print("RDR variances: ", rdr_vars.flatten())
+            print("BAF means:     ", baf_means.flatten().round(3))
+            print("RDR means:     ", rdr_means.flatten().round(3))
+            print("RDR variances: ", rdr_vars.flatten().round(3))
 
         if np.abs(delta_ll) < tol_ll:
             if verbose:
@@ -387,6 +387,15 @@ def run_hmm(
             K,
             N,
         )
+        # posts_hard = np.zeros_like(posts)          # (N,K,2)
+        # posts_hard[np.arange(len(cluster_labels)), cluster_labels, phase_labels] = 1.0
+        # rdr_means, rdr_vars, baf_means = _do_mstep_emissions(
+        #     X_rdrs, X_alphas, X_betas, posts_hard, K, M, N, tau, min_covar, tol
+        # )
+        # print("Viterbi")
+        # print("BAF means:     ", baf_means.flatten().round(3))
+        # print("RDR means:     ", rdr_means.flatten().round(3))
+        # print("RDR variances: ", rdr_vars.flatten().round(3))
 
     score = 0
     if score_method == "bic":
@@ -453,7 +462,7 @@ def run_viterbi(
                         best_k, best_h = prev_k, 0
 
                     trans10 = log_transmat[prev_k, k] + pswitch
-                    val10 = delta[obs - 1, prev_k, 0] + trans10
+                    val10 = delta[obs - 1, prev_k, 1] + trans10
                     if val10 > best_val:
                         best_val = val10
                         best_k, best_h = prev_k, 1
@@ -473,11 +482,11 @@ def run_viterbi(
                         best_k, best_h = prev_k, 1
 
                     trans01 = log_transmat[prev_k, k] + pswitch
-                    val01 = delta[obs - 1, prev_k, 1] + trans01
+                    val01 = delta[obs - 1, prev_k, 0] + trans01
                     if val01 > best_val:
                         best_val = val01
                         best_k, best_h = prev_k, 0
-                delta[obs, k, 1] = lls0_seg[obs, k] + best_val
+                delta[obs, k, 1] = lls1_seg[obs, k] + best_val
                 psi[obs, k, 1, 0] = best_k
                 psi[obs, k, 1, 1] = best_h
 

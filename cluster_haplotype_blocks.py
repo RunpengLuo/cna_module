@@ -38,7 +38,8 @@ if __name__ == "__main__":
     lasso_penalty = 0.5
     # init_method = "ward" # "k-means++" "gmm"
     init_method = "k-means++"
-    decode_method = "map"
+    # decode_method = "map"
+    decode_method = "viterbi"
     score_method = "bic"
 
     # input files
