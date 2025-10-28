@@ -35,9 +35,10 @@ if __name__ == "__main__":
     n_iter = args["niters"]
     verbose = True
 
-    lasso_penalty = 0.5
+    lasso_penalty = 1
     # init_method = "ward" # "k-means++" "gmm"
-    init_method = "k-means++"
+    # init_method = "k-means++"
+    init_method = "ward"
     # decode_method = "map"
     decode_method = "viterbi"
     score_method = "bic"

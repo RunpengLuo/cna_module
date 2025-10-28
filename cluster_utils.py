@@ -155,20 +155,19 @@ def forward_backward(
             pswitch = log_switchprobs_seg[obs]
             pstay = log_stayprobs_seg[obs]
 
-            prev0 = fwd_lattice[obs - 1, :, 0]
-            prev1 = fwd_lattice[obs - 1, :, 1]
+            # alpha_{t-1}(k, 0)
+            prev0 = fwd_lattice[obs - 1, :, 0] # (K,)
+            prev1 = fwd_lattice[obs - 1, :, 1] # (K,)
 
-            stay0 = logsumexp(prev0 + pstay, axis=0)  # 00
-            switch0 = logsumexp(prev1 + pswitch, axis=0)  # 10
-            fwd_lattice[obs, :, 0] = lls0_seg[obs] + logsumexp(
-                np.stack([stay0, switch0]), axis=0
-            )
+            # h = 0
+            stay0   = logsumexp(prev0[:, None] + log_transmat + pstay,   axis=0)
+            switch0 = logsumexp(prev1[:, None] + log_transmat + pswitch, axis=0)
+            fwd_lattice[obs, :, 0] = lls0_seg[obs] + np.logaddexp(stay0, switch0)
 
-            stay1 = logsumexp(prev1 + pstay, axis=0)
-            switch1 = logsumexp(prev0 + pswitch, axis=0)
-            fwd_lattice[obs, :, 1] = lls1_seg[obs] + logsumexp(
-                np.stack([stay1, switch1]), axis=0
-            )
+            # h = 1
+            stay1   = logsumexp(prev1[:, None] + log_transmat + pstay,   axis=0)
+            switch1 = logsumexp(prev0[:, None] + log_transmat + pswitch, axis=0)
+            fwd_lattice[obs, :, 1] = lls1_seg[obs] + np.logaddexp(stay1, switch1)
 
             # normalize this step
             log_c[obs] = logsumexp(fwd_lattice[obs])
