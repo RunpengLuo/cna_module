@@ -295,7 +295,6 @@ def run_hmm(
     tol_ll=1e-4,
     tol=1e-6,
     decode_method="map",
-    score_method="bic",
     verbose=True,
     plot_dir=None,
 ):
@@ -318,7 +317,6 @@ def run_hmm(
     (N, M) = X_rdrs.shape
 
     assert decode_method in ["map", "viterbi"]
-    assert score_method in ["bic"]
     assert n_iter > 1
 
     S = len(X_lengths)
@@ -386,21 +384,6 @@ def run_hmm(
             K,
             N,
         )
-        # posts_hard = np.zeros_like(posts)          # (N,K,2)
-        # posts_hard[np.arange(len(cluster_labels)), cluster_labels, phase_labels] = 1.0
-        # rdr_means, rdr_vars, baf_means = _do_mstep_emissions(
-        #     X_rdrs, X_alphas, X_betas, posts_hard, K, M, N, tau, min_covar, tol
-        # )
-        # print("Viterbi")
-        # print("BAF means:     ", baf_means.flatten().round(3))
-        # print("RDR means:     ", rdr_means.flatten().round(3))
-        # print("RDR variances: ", rdr_vars.flatten().round(3))
-
-    score = 0
-    if score_method == "bic":
-        num_free_params = 2 * K * M + K * M  # emissions
-        num_free_params += S * (2 * K - 1)  # startprobs
-        score = -2.0 * model_ll + num_free_params * np.log(N)
 
     return {
         "RDR_means": rdr_means,
@@ -409,11 +392,14 @@ def run_hmm(
         "tau": tau,
         "elbo_trace": elbo_trace,
         "model_ll": model_ll,
-        "model_score": score,
         "cluster_labels": cluster_labels,
         "phase_labels": phase_labels,
     }
 
+def compute_bic(ll: float, K: int, S: int, M: int, N: int):
+    num_free_params = 2 * K * M + K * M  # emissions
+    num_free_params += S * (2 * K - 1)  # startprobs
+    return -2.0 * ll + num_free_params * np.log(N)
 
 ##################################################
 # viterbi decode
@@ -504,3 +490,66 @@ def run_viterbi(
         start = end
 
     return cluster_labels, phase_labels
+
+##################################################
+def postprocess_clusters(
+    X_rdrs: np.ndarray,
+    cluster_labels: np.ndarray,
+    rdr_means: np.ndarray,
+    baf_means: np.ndarray,
+    baf_tol: float,
+    rdr_tol: float,
+    verbose=True
+):
+    """
+        1. Start with all components of the initially estimated mixture as current clusters. 
+        2. Find the pair of current clusters most promising to merge. 
+        3. Apply a stopping criterion to decide whether to merge them to form a new current cluster, 
+           or to use the current clustering as the final one. 
+        4. If merged, go to 2. 
+    """
+    if baf_tol > 0 and rdr_tol > 0:
+        rdr_means = rdr_means.copy()
+        baf_means = baf_means.copy()
+        K = rdr_means.shape[0]
+        cluster_ids = np.arange(K)
+        while True:
+            d_r = np.abs(rdr_means[:, None, :] - rdr_means[None, :, :]).mean(axis=2)  # (K,K)
+            d_b = np.abs(baf_means[:, None, :] - baf_means[None, :, :]).mean(axis=2)  # (K,K)
+            D = 0.5 * (d_r + d_b)
+            np.fill_diagonal(D, np.inf)
+
+            i, j = np.unravel_index(np.argmin(D), D.shape)
+            diff_rdr, diff_baf = d_r[i, j], d_b[i, j]
+
+            if diff_rdr > rdr_tol or diff_baf > baf_tol:
+                break
+
+            if verbose:
+                print(f"merge clusters with diff_rdr={diff_rdr:.3f} and diff_baf={diff_baf:.3f}")
+                print(cluster_ids[i], rdr_means[i].round(3), baf_means[i].round(3))
+                print(cluster_ids[j], rdr_means[j].round(3), baf_means[j].round(3))
+
+            new_rdr = 0.5 * (rdr_means[i] + rdr_means[j])
+            new_baf = 0.5 * (baf_means[i] + baf_means[j])
+            new_id = min(cluster_ids[i], cluster_ids[j])
+            old_id = max(cluster_ids[i], cluster_ids[j])
+
+            cluster_labels[cluster_labels == old_id] = new_id
+
+            keep = np.ones(K, dtype=bool)
+            keep[[i, j]] = False
+            rdr_means = np.concatenate([rdr_means[keep], new_rdr[None, :]], axis=0)
+            baf_means = np.concatenate([baf_means[keep], new_baf[None, :]], axis=0)
+            cluster_ids = np.append(cluster_ids[keep], new_id)
+            K = rdr_means.shape[0]
+    
+    _, inv = np.unique(cluster_labels, return_inverse=True)
+    cluster_labels = inv + 1
+    unique_labels = np.unique(cluster_labels)
+
+    rdr_vars = np.zeros_like(rdr_means, dtype=np.float32)
+    for k in range(len(unique_labels)):
+        x_rdrs = X_rdrs[cluster_labels == k + 1, :]
+        rdr_vars[k] = np.var(x_rdrs, axis=0, ddof=0)
+    return rdr_means, rdr_vars, baf_means, cluster_labels

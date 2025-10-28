@@ -36,12 +36,12 @@ if __name__ == "__main__":
     verbose = True
 
     lasso_penalty = 1
-    # init_method = "ward" # "k-means++" "gmm"
-    # init_method = "k-means++"
-    init_method = "ward"
-    # decode_method = "map"
-    decode_method = "viterbi"
+    init_method = "ward" # "k-means++"
+    decode_method = "viterbi" # "map"
     score_method = "bic"
+
+    baf_tol = 1e-3
+    rdr_tol = 1e-3
 
     # input files
     block_dir = os.path.join(work_dir, args["block_dir"])
@@ -181,7 +181,6 @@ if __name__ == "__main__":
                 tau,
                 n_iter,
                 decode_method=decode_method,
-                score_method=score_method,
                 plot_dir=plot_dir,
             )
             model_ll = curr_model["model_ll"]
@@ -190,28 +189,27 @@ if __name__ == "__main__":
                 best_model = curr_model
 
         ##################################################
-        # map to rank labels to avoid cluster label gaps
-        raw_cluster_labels = best_model["cluster_labels"]
-        _, inv = np.unique(raw_cluster_labels, return_inverse=True)
-        cluster_labels = inv + 1
-        best_model["cluster_labels"] = cluster_labels
-        unique_labels = np.unique(cluster_labels)
-
-        phase_labels = best_model["phase_labels"]
-        elbo_trace = best_model["elbo_trace"]
-
         # (#cluster, #samples)
-        expected_rdr_mean = best_model["RDR_means"]
-        expected_rdr_var = best_model["RDR_vars"]
-        expected_baf_mean = best_model["BAF_means"]
+        rdr_means, rdr_vars, baf_means, cluster_labels = postprocess_clusters(
+            X_rdrs,
+            best_model["cluster_labels"],
+            best_model["RDR_means"],
+            best_model["BAF_means"],
+            baf_tol,
+            rdr_tol,
+            verbose=verbose
+        )
+        unique_labels = np.unique(cluster_labels)
+        est_K = len(unique_labels)
+        score = compute_bic(best_model["model_ll"], est_K, len(X_lengths), 
+                            X_rdrs.shape[0], X_rdrs.shape[1])
+        phase_labels = best_model["phase_labels"]
 
         X_betas_phased = (
             X_alphas * (1 - phase_labels[:, None]) + X_betas * phase_labels[:, None]
         )
         phased_bafs = X_betas_phased / X_totals
-        # manually merge clusters? TODO
-
-        model_scores.append(best_model["model_score"])
+        model_scores.append(score)
 
         ##################################################
         plot_1d2d(
@@ -219,8 +217,8 @@ if __name__ == "__main__":
             phased_bafs,
             X_rdrs,
             cluster_labels,
-            expected_rdr_mean,
-            expected_baf_mean,
+            rdr_means,
+            baf_means,
             genome_file,
             plot_dir,
             out_prefix=f"K{K}_",
@@ -250,9 +248,9 @@ if __name__ == "__main__":
                         len(bb_sample),
                         bb_sample["#SNPS"].sum(),
                         ave_cov,
-                        expected_baf_mean[l, s],
-                        expected_rdr_mean[l, s],
-                        expected_rdr_var[l, s],
+                        baf_means[l, s],
+                        rdr_means[l, s],
+                        rdr_vars[l, s],
                     ]
                 )
         seg = pd.DataFrame(
