@@ -115,8 +115,8 @@ if __name__ == "__main__":
             taus[s] = seg_tau
         start = end
     
-    tau = np.median(taus)
-    use_binom = False
+    # tau = np.median(taus)
+    # use_binom = False
     print(taus.round(3))
     print(np.mean(taus), np.median(taus), np.var(taus))
     ##################################################
@@ -195,7 +195,7 @@ if __name__ == "__main__":
         phase_labels = best_model["phase_labels"]
 
         # TODO here we can access switchprobs per segment
-        
+
         X_betas_phased = (
             X_alphas * (1 - phase_labels[:, None]) + X_betas * phase_labels[:, None]
         )
