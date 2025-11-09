@@ -226,14 +226,19 @@ def _do_mstep_emissions(
         ll = np.sum(logprob0 * posts[:, k, 0]) + np.sum(logprob1 * posts[:, k, 1])
         return -ll
 
-    posts_marg = np.sum(posts, axis=-1)  # (N, K)
-    Nk = np.sum(posts_marg, axis=0)  # (K, )
+    posts_marg_cluster = np.sum(posts, axis=-1)  # (N, K)
+    Nk = np.sum(posts_marg_cluster, axis=0)  # (K, )
+
+    # TODO handle allelic balanced cluster more carefully
+    # when true p is 0.5, model is un-identifiable
+    # LRT?
+    postprocess_phase = np.sum(posts, axis=1)  # (N, 2)
 
     # update RDR means and covars
     rdr_means = np.empty((K, M), dtype=np.float64)
     rdr_vars = np.empty((K, M), dtype=np.float64)
     for k in range(K):
-        w = posts_marg[:, k][:, None]  # (N, 1)
+        w = posts_marg_cluster[:, k][:, None]  # (N, 1)
         rdr_means[k] = np.sum(w * X_rdrs, axis=0) / Nk[k]
         rdr_vars[k] = np.maximum(
             np.sum(w * (X_rdrs - rdr_means[k]) ** 2, axis=0) / Nk[k], min_covar
@@ -494,12 +499,14 @@ def run_viterbi(
 ##################################################
 def postprocess_clusters(
     X_rdrs: np.ndarray,
+    X_mhbafs: np.ndarray,
     cluster_labels: np.ndarray,
     rdr_means: np.ndarray,
     baf_means: np.ndarray,
     baf_tol: float,
     rdr_tol: float,
-    verbose=True
+    verbose=True,
+    refine_hard=False
 ):
     """
         1. Start with all components of the initially estimated mixture as current clusters. 
@@ -508,7 +515,7 @@ def postprocess_clusters(
            or to use the current clustering as the final one. 
         4. If merged, go to 2. 
     """
-    if baf_tol > 0 and rdr_tol > 0:
+    if baf_tol > 0 and rdr_tol > 0: # merge over-split clusters, controls sensitivity
         rdr_means = rdr_means.copy()
         baf_means = baf_means.copy()
         K = rdr_means.shape[0]
@@ -548,8 +555,13 @@ def postprocess_clusters(
     cluster_labels = inv + 1
     unique_labels = np.unique(cluster_labels)
 
+    # re-estimate centers
     rdr_vars = np.zeros_like(rdr_means, dtype=np.float32)
     for k in range(len(unique_labels)):
         x_rdrs = X_rdrs[cluster_labels == k + 1, :]
         rdr_vars[k] = np.var(x_rdrs, axis=0, ddof=0)
+        if refine_hard:
+            rdr_means[k] = np.mean(x_rdrs, axis=0)
+            x_mhbafs = X_mhbafs[cluster_labels == k + 1, :]
+            baf_means[k] = np.mean(x_mhbafs, axis=0)
     return rdr_means, rdr_vars, baf_means, cluster_labels

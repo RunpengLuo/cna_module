@@ -99,8 +99,9 @@ if __name__ == "__main__":
     log_stayprobs = np.log(1 - switchprobs)
 
     # estimate over-dispersion parameter from normal sample
-    # tau = estimate_overdispersion(alphas[:, 0], betas[:, 0], max_tau=1e5)
-    # use_binom = tau is None
+    tau = estimate_overdispersion(alphas[:, 0], betas[:, 0], max_tau=1e5)
+    use_binom = tau is None
+    print(f"estimated tau={tau}, use binom={use_binom}")
     start = 0
     taus = np.zeros_like(X_lengths, dtype=np.float32)
     for s, nobs in enumerate(X_lengths):
@@ -118,7 +119,6 @@ if __name__ == "__main__":
     use_binom = False
     print(taus.round(3))
     print(np.mean(taus), np.median(taus), np.var(taus))
-    print(f"estimated tau={tau}, use binom={use_binom}")
     ##################################################
     print("fused lasso segmentation")
     seg_rdrs, seg_mhbafs, flasso_labels = fused_lasso_segmentations(
@@ -190,25 +190,32 @@ if __name__ == "__main__":
 
         ##################################################
         # (#cluster, #samples)
+        
+        # decode phased mhBAF
+        phase_labels = best_model["phase_labels"]
+
+        # TODO here we can access switchprobs per segment
+        
+        X_betas_phased = (
+            X_alphas * (1 - phase_labels[:, None]) + X_betas * phase_labels[:, None]
+        )
+        phased_bafs = X_betas_phased / X_totals
+
         rdr_means, rdr_vars, baf_means, cluster_labels = postprocess_clusters(
             X_rdrs,
+            phased_bafs,
             best_model["cluster_labels"],
             best_model["RDR_means"],
             best_model["BAF_means"],
             baf_tol,
             rdr_tol,
-            verbose=verbose
+            verbose=verbose,
+            refine_hard=False
         )
         unique_labels = np.unique(cluster_labels)
         est_K = len(unique_labels)
         score = compute_bic(best_model["model_ll"], est_K, len(X_lengths), 
                             X_rdrs.shape[0], X_rdrs.shape[1])
-        phase_labels = best_model["phase_labels"]
-
-        X_betas_phased = (
-            X_alphas * (1 - phase_labels[:, None]) + X_betas * phase_labels[:, None]
-        )
-        phased_bafs = X_betas_phased / X_totals
         model_scores.append(score)
 
         ##################################################
